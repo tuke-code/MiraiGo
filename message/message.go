@@ -1,22 +1,16 @@
 package message
 
 import (
-	"crypto/md5"
-	"math"
+	"encoding/json"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 	"github.com/Mrs4s/MiraiGo/utils"
 )
-
-var json = jsoniter.ConfigFastest
 
 type (
 	PrivateMessage struct {
@@ -54,17 +48,6 @@ type (
 		Elements []IMessageElement
 	}
 
-	ForwardMessage struct {
-		Nodes []*ForwardNode
-	}
-
-	ForwardNode struct {
-		SenderId   int64
-		SenderName string
-		Time       int32
-		Message    []IMessageElement
-	}
-
 	Sender struct {
 		Uin           int64
 		Nickname      string
@@ -87,8 +70,6 @@ type (
 	}
 
 	ElementType int
-
-	GroupGift int
 )
 
 // MusicType values.
@@ -100,34 +81,20 @@ const (
 	KuwoMusic         // 酷我音乐
 )
 
+//go:generate stringer -type ElementType -linecomment
 const (
-	Text ElementType = iota
-	Image
-	Face
-	At
-	Reply
-	Service
-	Forward
-	File
-	Voice
-	Video
-	LightApp
-	RedBag
-
-	HoldingYourHand GroupGift = 280
-	CuteCat         GroupGift = 281
-	MysteryMask     GroupGift = 284
-	SweetWink       GroupGift = 285
-	ImBusy          GroupGift = 286
-	HappyCola       GroupGift = 289
-	LuckyBracelet   GroupGift = 290
-	Cappuccino      GroupGift = 299
-	CatWatch        GroupGift = 302
-	FleeceGloves    GroupGift = 307
-	RainbowCandy    GroupGift = 308
-	LoveMask        GroupGift = 312
-	Stronger        GroupGift = 313
-	LoveMicrophone  GroupGift = 367
+	Text     ElementType = iota // 文本
+	Image                       // 图片
+	Face                        // 表情
+	At                          // 艾特
+	Reply                       // 回复
+	Service                     // 服务
+	Forward                     // 转发
+	File                        // 文件
+	Voice                       // 语音
+	Video                       // 视频
+	LightApp                    // 轻应用
+	RedBag                      // 红包
 )
 
 func (s *Sender) IsAnonymous() bool {
@@ -143,11 +110,6 @@ func (msg *PrivateMessage) ToString() (res string) {
 		switch e := elem.(type) {
 		case *TextElement:
 			res += e.Content
-		case *ImageElement:
-			res += "[Image:" + e.Filename + "]"
-		case *FriendFlashImgElement:
-			// NOTE: ignore other components
-			return "[Image (flash):" + e.Filename + "]"
 		case *FaceElement:
 			res += "[" + e.Name + "]"
 		case *AtElement:
@@ -162,8 +124,6 @@ func (msg *TempMessage) ToString() (res string) {
 		switch e := elem.(type) {
 		case *TextElement:
 			res += e.Content
-		case *ImageElement:
-			res += "[Image:" + e.Filename + "]"
 		case *FaceElement:
 			res += "[" + e.Name + "]"
 		case *AtElement:
@@ -178,15 +138,12 @@ func (msg *GroupMessage) ToString() (res string) {
 		switch e := elem.(type) {
 		case *TextElement:
 			res += e.Content
-		case *ImageElement:
-			res += "[Image:" + e.Filename + "]"
 		case *FaceElement:
+			res += "[" + e.Name + "]"
+		case *MarketFaceElement:
 			res += "[" + e.Name + "]"
 		case *GroupImageElement:
 			res += "[Image: " + e.ImageId + "]"
-		case *GroupFlashImgElement:
-			// NOTE: ignore other components
-			return "[Image (flash):" + e.Filename + "]"
 		case *AtElement:
 			res += e.Display
 		case *RedBagElement:
@@ -248,24 +205,23 @@ func (msg *SendingMessage) ToFragmented() [][]IMessageElement {
 	return fragmented
 }
 
-func EstimateLength(elems []IMessageElement, limit int) int {
+// 单条消息发送的大小限制（预估）
+const MaxMessageSize = 5000
+
+func EstimateLength(elems []IMessageElement) int {
 	sum := 0
 	for _, elem := range elems {
-		if sum > limit {
-			break
-		}
-		left := int(math.Max(float64(limit-sum), 0))
 		switch e := elem.(type) {
 		case *TextElement:
-			sum += utils.ChineseLength(e.Content, left)
+			sum += len(e.Content)
 		case *AtElement:
-			sum += utils.ChineseLength(e.Display, left)
+			sum += len(e.Display)
 		case *ReplyElement:
-			sum += 444 + EstimateLength(e.Elements, left)
-		case *ImageElement, *GroupImageElement, *FriendImageElement:
+			sum += 444 + EstimateLength(e.Elements)
+		case *GroupImageElement, *FriendImageElement:
 			sum += 100
 		default:
-			sum += utils.ChineseLength(ToReadableString([]IMessageElement{elem}), left)
+			sum += len(ToReadableString([]IMessageElement{elem}))
 		}
 	}
 	return sum
@@ -346,20 +302,17 @@ func ToProtoElems(elems []IMessageElement, generalFlags bool) (r []*msg.Elem) {
 	return
 }
 
-func ToSrcProtoElems(elems []IMessageElement) (r []*msg.Elem) {
-	for _, elem := range elems {
-		switch e := elem.(type) {
-		case *ImageElement, *GroupImageElement, *FriendImageElement:
-			r = append(r, &msg.Elem{
-				Text: &msg.Text{
-					Str: proto.String("[图片]"),
-				},
-			})
-		default:
-			r = append(r, ToProtoElems([]IMessageElement{e}, false)...)
+var photoTextElem IMessageElement = NewText("[图片]")
+
+func ToSrcProtoElems(elems []IMessageElement) []*msg.Elem {
+	elems2 := make([]IMessageElement, len(elems))
+	copy(elems2, elems)
+	for i, elem := range elems2 {
+		if elem.Type() == Image {
+			elems2[i] = photoTextElem
 		}
 	}
-	return
+	return ToProtoElems(elems2, false)
 }
 
 func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
@@ -370,6 +323,7 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 				ReplySeq: elem.SrcMsg.OrigSeqs[0],
 				Time:     elem.SrcMsg.GetTime(),
 				Sender:   elem.SrcMsg.GetSenderUin(),
+				GroupID:  elem.SrcMsg.GetToUin(),
 				Elements: ParseMessageElems(elem.SrcMsg.Elems),
 			}
 			res = append(res, r)
@@ -416,12 +370,36 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 					Size:      elem.VideoFile.GetFileSize(),
 					ThumbSize: elem.VideoFile.GetThumbFileSize(),
 					Md5:       elem.VideoFile.FileMd5,
-					ThumbMd5:  elem.VideoFile.GetThumbFileMd5(),
+					ThumbMd5:  elem.VideoFile.ThumbFileMd5,
 				},
 			}
 		}
 		if elem.Text != nil {
-			if len(elem.Text.Attr6Buf) == 0 {
+			switch {
+			case len(elem.Text.Attr6Buf) > 0:
+				att6 := binary.NewReader(elem.Text.Attr6Buf)
+				att6.ReadBytes(7)
+				target := int64(uint32(att6.ReadInt32()))
+				at := NewAt(target, elem.Text.GetStr())
+				at.SubType = AtTypeGroupMember
+				res = append(res, at)
+			case len(elem.Text.PbReserve) > 0:
+				resv := new(msg.TextResvAttr)
+				_ = proto.Unmarshal(elem.Text.PbReserve, resv)
+				if resv.GetAtType() == 2 {
+					at := NewAt(int64(resv.GetAtMemberTinyid()), elem.Text.GetStr())
+					at.SubType = AtTypeGuildMember
+					res = append(res, at)
+					break
+				}
+				if resv.GetAtType() == 4 {
+					at := NewAt(int64(resv.AtChannelInfo.GetChannelId()), elem.Text.GetStr())
+					at.SubType = AtTypeGuildChannel
+					res = append(res, at)
+					break
+				}
+				fallthrough
+			default:
 				res = append(res, NewText(func() string {
 					// 这么处理应该没问题
 					if strings.Contains(elem.Text.GetStr(), "\r") && !strings.Contains(elem.Text.GetStr(), "\r\n") {
@@ -429,11 +407,6 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 					}
 					return elem.Text.GetStr()
 				}()))
-			} else {
-				att6 := binary.NewReader(elem.Text.Attr6Buf)
-				att6.ReadBytes(7)
-				target := int64(uint32(att6.ReadInt32()))
-				res = append(res, NewAt(target, elem.Text.GetStr()))
 			}
 		}
 		if elem.RichMsg != nil {
@@ -446,10 +419,9 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 			}
 			if content != "" {
 				if elem.RichMsg.GetServiceId() == 35 {
-					reg := regexp.MustCompile(`m_resid="(\w+?.*?)"`)
-					sub := reg.FindAllStringSubmatch(content, -1)
-					if len(sub) > 0 && len(sub[0]) > 1 {
-						res = append(res, &ForwardElement{ResId: reg.FindAllStringSubmatch(content, -1)[0][1]})
+					elem := forwardMsgFromXML(content)
+					if elem != nil {
+						res = append(res, elem)
 						continue
 					}
 				}
@@ -459,11 +431,9 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 				if isOk := strings.Contains(content, "<?xml"); isOk {
 					res = append(res, NewRichXml(content, int64(elem.RichMsg.GetServiceId())))
 					continue
-				} else {
-					if json.Valid(utils.S2B(content)) {
-						res = append(res, NewRichJson(content))
-						continue
-					}
+				} else if json.Valid(utils.S2B(content)) {
+					res = append(res, NewRichJson(content))
+					continue
 				}
 				res = append(res, NewText(content))
 			}
@@ -472,32 +442,100 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 			if len(elem.CustomFace.Md5) == 0 {
 				continue
 			}
-			res = append(res, &ImageElement{
-				Filename: elem.CustomFace.GetFilePath(),
-				Size:     elem.CustomFace.GetSize(),
-				Width:    elem.CustomFace.GetWidth(),
-				Height:   elem.CustomFace.GetHeight(),
-				Url: func() string {
-					if elem.CustomFace.GetOrigUrl() == "" {
-						return "https://gchat.qpic.cn/gchatpic_new/0/0-0-" + strings.ReplaceAll(binary.CalculateImageResourceId(elem.CustomFace.Md5)[1:37], "-", "") + "/0?term=2"
+			var url string
+			if elem.CustomFace.GetOrigUrl() == "" {
+				url = "https://gchat.qpic.cn/gchatpic_new/0/0-0-" + strings.ReplaceAll(binary.CalculateImageResourceId(elem.CustomFace.Md5)[1:37], "-", "") + "/0?term=2"
+			} else {
+				url = "https://gchat.qpic.cn" + elem.CustomFace.GetOrigUrl()
+			}
+			if strings.Contains(elem.CustomFace.GetOrigUrl(), "qmeet") {
+				res = append(res, &GuildImageElement{
+					FileId:   int64(elem.CustomFace.GetFileId()),
+					FilePath: elem.CustomFace.GetFilePath(),
+					Size:     elem.CustomFace.GetSize(),
+					Width:    elem.CustomFace.GetWidth(),
+					Height:   elem.CustomFace.GetHeight(),
+					Url:      url,
+					Md5:      elem.CustomFace.Md5,
+				})
+				continue
+			}
+			res = append(res, &GroupImageElement{
+				FileId:  int64(elem.CustomFace.GetFileId()),
+				ImageId: elem.CustomFace.GetFilePath(),
+				Size:    elem.CustomFace.GetSize(),
+				Width:   elem.CustomFace.GetWidth(),
+				Height:  elem.CustomFace.GetHeight(),
+				Url:     url,
+				ImageBizType: func() ImageBizType {
+					if len(elem.CustomFace.PbReserve) == 0 {
+						return UnknownBizType
 					}
-					return "https://gchat.qpic.cn" + elem.CustomFace.GetOrigUrl()
+					attr := new(msg.ResvAttr)
+					if proto.Unmarshal(elem.CustomFace.PbReserve, attr) != nil {
+						return UnknownBizType
+					}
+					return ImageBizType(attr.GetImageBizType())
 				}(),
 				Md5: elem.CustomFace.Md5,
 			})
+		}
+		if elem.MarketFace != nil {
+			face := &MarketFaceElement{
+				Name:       utils.B2S(elem.MarketFace.FaceName),
+				FaceId:     elem.MarketFace.FaceId,
+				TabId:      int32(elem.MarketFace.GetTabId()),
+				ItemType:   int32(elem.MarketFace.GetItemType()),
+				SubType:    int32(elem.MarketFace.GetSubType()),
+				MediaType:  int32(elem.MarketFace.GetMediaType()),
+				EncryptKey: elem.MarketFace.Key,
+				MagicValue: utils.B2S(elem.MarketFace.Mobileparam),
+			}
+			if face.Name == "[骰子]" || face.Name == "[随机骰子]" {
+				return []IMessageElement{
+					&DiceElement{
+						MarketFaceElement: face,
+						Value: func() int32 {
+							v := strings.SplitN(face.MagicValue, "=", 2)[1]
+							t, _ := strconv.ParseInt(v, 10, 32)
+							return int32(t) + 1
+						}(),
+					},
+				}
+			}
+			if face.Name == "[猜拳]" {
+				v := strings.SplitN(face.MagicValue, "=", 2)[1]
+				t, _ := strconv.ParseInt(v, 10, 32)
+				return []IMessageElement{
+					&FingerGuessingElement{
+						MarketFaceElement: face,
+						Value:             int32(t),
+						Name:              fingerGuessingName[int32(t)],
+					},
+				}
+			}
+			return []IMessageElement{face}
 		}
 		if elem.NotOnlineImage != nil {
 			var img string
 			if elem.NotOnlineImage.GetOrigUrl() != "" {
 				img = "https://c2cpicdw.qpic.cn" + elem.NotOnlineImage.GetOrigUrl()
 			} else {
-				img = "https://c2cpicdw.qpic.cn/offpic_new/0/" + elem.NotOnlineImage.GetResId() + "/0?term=2"
+				img = "https://c2cpicdw.qpic.cn/offpic_new/0"
+				downloadPath := elem.NotOnlineImage.GetResId()
+				if elem.NotOnlineImage.GetDownloadPath() != "" {
+					downloadPath = elem.NotOnlineImage.GetDownloadPath()
+				}
+				if !strings.HasPrefix(downloadPath, "/") {
+					img += "/"
+				}
+				img += downloadPath + "/0?term=3"
 			}
-			res = append(res, &ImageElement{
-				Filename: elem.NotOnlineImage.GetFilePath(),
-				Size:     elem.NotOnlineImage.GetFileLen(),
-				Url:      img,
-				Md5:      elem.NotOnlineImage.PicMd5,
+			res = append(res, &FriendImageElement{
+				ImageId: elem.NotOnlineImage.GetFilePath(),
+				Size:    elem.NotOnlineImage.GetFileLen(),
+				Url:     img,
+				Md5:     elem.NotOnlineImage.PicMd5,
 			})
 		}
 		if elem.QQWalletMsg != nil && elem.QQWalletMsg.AioBody != nil {
@@ -521,24 +559,23 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 				flash := &msg.MsgElemInfoServtype3{}
 				_ = proto.Unmarshal(elem.CommonElem.PbElem, flash)
 				if flash.FlashTroopPic != nil {
-					res = append(res, &GroupFlashImgElement{
-						ImageElement{
-							Filename: flash.FlashTroopPic.GetFilePath(),
-							Size:     flash.FlashTroopPic.GetSize(),
-							Width:    flash.FlashTroopPic.GetWidth(),
-							Height:   flash.FlashTroopPic.GetHeight(),
-							Md5:      flash.FlashTroopPic.Md5,
-						},
+					res = append(res, &GroupImageElement{
+						FileId:  int64(flash.FlashTroopPic.GetFileId()),
+						ImageId: flash.FlashTroopPic.GetFilePath(),
+						Size:    flash.FlashTroopPic.GetSize(),
+						Width:   flash.FlashTroopPic.GetWidth(),
+						Height:  flash.FlashTroopPic.GetHeight(),
+						Md5:     flash.FlashTroopPic.Md5,
+						Flash:   true,
 					})
 					return res
 				}
 				if flash.FlashC2CPic != nil {
-					res = append(res, &GroupFlashImgElement{
-						ImageElement{
-							Filename: flash.FlashC2CPic.GetFilePath(),
-							Size:     flash.FlashC2CPic.GetFileLen(),
-							Md5:      flash.FlashC2CPic.PicMd5,
-						},
+					res = append(res, &FriendImageElement{
+						ImageId: flash.FlashC2CPic.GetFilePath(),
+						Size:    flash.FlashC2CPic.GetFileLen(),
+						Md5:     flash.FlashC2CPic.PicMd5,
+						Flash:   true,
 					})
 					return res
 				}
@@ -546,91 +583,33 @@ func ParseMessageElems(elems []*msg.Elem) []IMessageElement {
 				newSysFaceMsg := &msg.MsgElemInfoServtype33{}
 				_ = proto.Unmarshal(elem.CommonElem.PbElem, newSysFaceMsg)
 				res = append(res, NewFace(int32(newSysFaceMsg.GetIndex())))
+			case 37:
+				animatedStickerMsg := &msg.MsgElemInfoServtype37{}
+				_ = proto.Unmarshal(elem.CommonElem.PbElem, animatedStickerMsg)
+				sticker := &AnimatedSticker{
+					ID:   int32(animatedStickerMsg.GetQsid()),
+					Name: strings.TrimPrefix(string(animatedStickerMsg.Text), "/"),
+				}
+				return []IMessageElement{sticker} // sticker 永远为单独消息
 			}
 		}
 	}
 	return res
 }
 
-func (forMsg *ForwardMessage) CalculateValidationData(seq, random int32, groupCode int64) ([]byte, []byte) {
-	msgs := forMsg.packForwardMsg(seq, random, groupCode)
-	trans := &msg.PbMultiMsgTransmit{Msg: msgs, PbItemList: []*msg.PbMultiMsgItem{
-		{
-			FileName: proto.String("MultiMsg"),
-			Buffer:   &msg.PbMultiMsgNew{Msg: msgs},
-		},
-	}}
-	b, _ := proto.Marshal(trans)
-	data := binary.GZipCompress(b)
-	hash := md5.Sum(data)
-	return data, hash[:]
-}
-
-// CalculateValidationDataForward 屎代码
-func (forMsg *ForwardMessage) CalculateValidationDataForward(seq, random int32, groupCode int64) ([]byte, []byte, []*msg.PbMultiMsgItem) {
-	msgs := forMsg.packForwardMsg(seq, random, groupCode)
-	trans := &msg.PbMultiMsgTransmit{Msg: msgs, PbItemList: []*msg.PbMultiMsgItem{
-		{
-			FileName: proto.String("MultiMsg"),
-			Buffer:   &msg.PbMultiMsgNew{Msg: msgs},
-		},
-	}}
-	for _, node := range forMsg.Nodes {
-		for _, message := range node.Message {
-			if forwardElement, ok := message.(*ForwardElement); ok {
-				trans.PbItemList = append(trans.PbItemList, forwardElement.Items...)
-			}
-		}
-	}
-	b, _ := proto.Marshal(trans)
-	data := binary.GZipCompress(b)
-	hash := md5.Sum(data)
-	return data, hash[:], trans.PbItemList
-}
-
-func (forMsg *ForwardMessage) packForwardMsg(seq int32, random int32, groupCode int64) []*msg.Message {
-	msgs := make([]*msg.Message, 0, len(forMsg.Nodes))
-	for _, node := range forMsg.Nodes {
-		msgs = append(msgs, &msg.Message{
-			Head: &msg.MessageHead{
-				FromUin: &node.SenderId,
-				MsgSeq:  &seq,
-				MsgTime: &node.Time,
-				MsgUid:  proto.Int64(0x01000000000000000 | (int64(random) & 0xFFFFFFFF)),
-				MutiltransHead: &msg.MutilTransHead{
-					MsgId: proto.Int32(1),
-				},
-				MsgType: proto.Int32(82),
-				GroupInfo: &msg.GroupInfo{
-					GroupCode: &groupCode,
-					GroupRank: []byte{},
-					GroupName: []byte{},
-					GroupCard: &node.SenderName,
-				},
-			},
-			Body: &msg.MessageBody{
-				RichText: &msg.RichText{
-					Elems: ToProtoElems(node.Message, false),
-				},
-			},
-		})
-	}
-	return msgs
-}
-
-func ToReadableString(m []IMessageElement) (r string) {
+func ToReadableString(m []IMessageElement) string {
+	sb := new(strings.Builder)
 	for _, elem := range m {
 		switch e := elem.(type) {
 		case *TextElement:
-			r += e.Content
-		case *ImageElement:
-			r += "[图片]"
+			sb.WriteString(e.Content)
+		case *GroupImageElement, *FriendImageElement:
+			sb.WriteString("[图片]")
 		case *FaceElement:
-			r += "/" + e.Name
-		case *GroupImageElement:
-			r += "[图片]"
+			sb.WriteByte('/')
+			sb.WriteString(e.Name)
 		case *ForwardElement:
-			r += "[聊天记录]"
+			sb.WriteString("[聊天记录]")
 		// NOTE: flash pic is singular
 		// To be clarified
 		// case *GroupFlashImgElement:
@@ -638,12 +617,173 @@ func ToReadableString(m []IMessageElement) (r string) {
 		// case *FriendFlashImgElement:
 		// 	return "[闪照]"
 		case *AtElement:
-			r += e.Display
+			sb.WriteString(e.Display)
 		}
 	}
-	return
+	return sb.String()
 }
 
 func FaceNameById(id int) string {
-	return faceMap[id]
+	if name, ok := faceMap[id]; ok {
+		return name
+	}
+	return "未知表情"
+}
+
+// SplitLongMessage 将过长的消息分割为若干个适合发送的消息
+func SplitLongMessage(sendingMessage *SendingMessage) []*SendingMessage {
+	// 合并连续文本消息
+	sendingMessage = mergeContinuousTextMessages(sendingMessage)
+
+	// 分割过长元素
+	sendingMessage = splitElements(sendingMessage)
+
+	// 将元素分为多组，确保各组不超过单条消息的上限
+	splitMessages := splitMessages(sendingMessage)
+
+	return splitMessages
+}
+
+// mergeContinuousTextMessages 预先将所有连续的文本消息合并为到一起，方便后续统一切割
+func mergeContinuousTextMessages(sendingMessage *SendingMessage) *SendingMessage {
+	// 检查下是否有连续的文本消息，若没有，则可以直接返回
+	lastIsText := false
+	hasContinuousText := false
+	for _, message := range sendingMessage.Elements {
+		if message.Type() == Text {
+			if lastIsText {
+				// 有连续的文本消息，需要进行处理
+				hasContinuousText = true
+				break
+			}
+
+			// 遇到文本元素先存放起来，方便将连续的文本元素合并
+			lastIsText = true
+			continue
+		} else {
+			lastIsText = false
+		}
+	}
+	if !hasContinuousText {
+		return sendingMessage
+	}
+
+	// 存在连续的文本消息，需要进行合并处理
+	textBuffer := strings.Builder{}
+	lastIsText = false
+	totalMessageCount := 0
+	for _, message := range sendingMessage.Elements {
+		if msgVal, ok := message.(*TextElement); ok {
+			// 遇到文本元素先存放起来，方便将连续的文本元素合并
+			textBuffer.WriteString(msgVal.Content)
+			lastIsText = true
+			continue
+		}
+
+		// 如果之前的是文本元素（可能是多个合并起来的），则在这里将其实际放入消息中
+		if lastIsText {
+			sendingMessage.Elements[totalMessageCount] = NewText(textBuffer.String())
+			totalMessageCount += 1
+			textBuffer.Reset()
+		}
+		lastIsText = false
+
+		// 非文本元素则直接处理
+		sendingMessage.Elements[totalMessageCount] = message
+		totalMessageCount += 1
+	}
+	// 处理最后几个元素是文本的情况
+	if textBuffer.Len() != 0 {
+		sendingMessage.Elements[totalMessageCount] = NewText(textBuffer.String())
+		totalMessageCount += 1
+		textBuffer.Reset()
+	}
+	sendingMessage.Elements = sendingMessage.Elements[:totalMessageCount]
+
+	return sendingMessage
+}
+
+// splitElements 将原有消息的各个元素先尝试处理，如过长的文本消息按需分割为多个元素
+func splitElements(sendingMessage *SendingMessage) *SendingMessage {
+	// 检查下是否存在需要文本消息，若不存在，则直接返回
+	needSplit := false
+	for _, message := range sendingMessage.Elements {
+		if msgVal, ok := message.(*TextElement); ok {
+			if textNeedSplit(msgVal.Content) {
+				needSplit = true
+				break
+			}
+		}
+	}
+	if !needSplit {
+		return sendingMessage
+	}
+
+	// 开始尝试切割
+	messageParts := NewSendingMessage()
+
+	for _, message := range sendingMessage.Elements {
+		switch msgVal := message.(type) {
+		case *TextElement:
+			messageParts.Elements = append(messageParts.Elements, splitPlainMessage(msgVal.Content)...)
+		default:
+			messageParts.Append(message)
+		}
+	}
+
+	return messageParts
+}
+
+// splitMessages 根据大小分为多个消息进行发送
+func splitMessages(sendingMessage *SendingMessage) []*SendingMessage {
+	var splitMessages []*SendingMessage
+
+	messagePart := NewSendingMessage()
+	msgSize := 0
+	for _, part := range sendingMessage.Elements {
+		estimateSize := EstimateLength([]IMessageElement{part})
+		// 若当前分消息加上新的元素后大小会超限，且已经有元素（确保不会无限循环），则开始切分为新的一个元素
+		if msgSize+estimateSize > MaxMessageSize && len(messagePart.Elements) > 0 {
+			splitMessages = append(splitMessages, messagePart)
+
+			messagePart = NewSendingMessage()
+			msgSize = 0
+		}
+
+		// 加上新的元素
+		messagePart.Append(part)
+		msgSize += estimateSize
+	}
+	// 将最后一个分片加上
+	if len(messagePart.Elements) != 0 {
+		splitMessages = append(splitMessages, messagePart)
+	}
+
+	return splitMessages
+}
+
+func splitPlainMessage(content string) []IMessageElement {
+	if !textNeedSplit(content) {
+		return []IMessageElement{NewText(content)}
+	}
+
+	splittedMessage := make([]IMessageElement, 0, (len(content)+MaxMessageSize-1)/MaxMessageSize)
+
+	last := 0
+	for runeIndex, runeValue := range content {
+		// 如果加上新的这个字符后，会超出大小，则从这个字符前分一次片
+		if runeIndex+len(string(runeValue))-last > MaxMessageSize {
+			splittedMessage = append(splittedMessage, NewText(content[last:runeIndex]))
+			last = runeIndex
+		}
+	}
+	if last != len(content) {
+		splittedMessage = append(splittedMessage, NewText(content[last:len(content)]))
+	}
+
+	return splittedMessage
+}
+
+func textNeedSplit(content string) bool {
+	return len(content) > MaxMessageSize
 }

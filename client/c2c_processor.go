@@ -1,42 +1,19 @@
 package client
 
+//go:generate go run github.com/Mrs4s/MiraiGo/internal/generator/c2c_switcher
+
 import (
 	"fmt"
-	"sync/atomic"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/binary"
+	"github.com/pkg/errors"
 
+	"github.com/Mrs4s/MiraiGo/binary"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 )
-
-var privateMsgDecoders = map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo){
-	9: privateMessageDecoder, 10: privateMessageDecoder, 31: privateMessageDecoder,
-	79: privateMessageDecoder, 97: privateMessageDecoder, 120: privateMessageDecoder,
-	132: privateMessageDecoder, 133: privateMessageDecoder, 166: privateMessageDecoder,
-	167: privateMessageDecoder, 140: tempSessionDecoder, 141: tempSessionDecoder,
-	208: privatePttDecoder,
-}
-
-var troopSystemMsgDecoders = map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo){
-	35: troopSystemMessageDecoder, 36: troopSystemMessageDecoder, 37: troopSystemMessageDecoder,
-	45: troopSystemMessageDecoder, 46: troopSystemMessageDecoder, 84: troopSystemMessageDecoder,
-	85: troopSystemMessageDecoder, 86: troopSystemMessageDecoder, 87: troopSystemMessageDecoder,
-}
-
-var sysMsgDecoders = map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo){
-	187: systemMessageDecoder, 188: systemMessageDecoder, 189: systemMessageDecoder,
-	190: systemMessageDecoder, 191: systemMessageDecoder,
-}
-
-var otherDecoders = map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo){
-	33: troopAddMemberBroadcastDecoder, 529: msgType0x211Decoder,
-}
-
-var c2cDecoders = map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo){}
 
 type (
 	TempSessionInfo struct {
@@ -51,33 +28,21 @@ type (
 )
 
 const (
-	GroupSource         TempSessionSource = 0 // 来自群聊
-	ConsultingSource    TempSessionSource = 1 // 来自QQ咨询
-	SearchSource        TempSessionSource = 2 // 来自查找
-	MovieSource         TempSessionSource = 3 // 来自QQ电影
-	HotChatSource       TempSessionSource = 4 // 来自热聊
-	SystemMessageSource TempSessionSource = 6 // 来自验证消息
-	MultiChatSource     TempSessionSource = 7 // 来自多人聊天
-	DateSource          TempSessionSource = 8 // 来自约会
-	AddressBookSource   TempSessionSource = 9 // 来自通讯录
+	GroupSource         TempSessionSource = iota // 来自群聊
+	ConsultingSource                             // 来自QQ咨询
+	SearchSource                                 // 来自查找
+	MovieSource                                  // 来自QQ电影
+	HotChatSource                                // 来自热聊
+	SystemMessageSource                          // 来自验证消息
+	MultiChatSource                              // 来自多人聊天
+	DateSource                                   // 来自约会
+	AddressBookSource                            // 来自通讯录
 )
 
-func init() {
-	merge := func(m map[int32]func(*QQClient, *msg.Message, *incomingPacketInfo)) {
-		for k, v := range m {
-			c2cDecoders[k] = v
-		}
-	}
-	merge(privateMsgDecoders)
-	merge(troopSystemMsgDecoders)
-	merge(sysMsgDecoders)
-	merge(otherDecoders)
-}
-
-func (c *QQClient) c2cMessageSyncProcessor(rsp *msg.GetMessageResponse, info *incomingPacketInfo) {
-	c.syncCookie = rsp.SyncCookie
-	c.pubAccountCookie = rsp.PubAccountCookie
-	c.msgCtrlBuf = rsp.MsgCtrlBuf
+func (c *QQClient) c2cMessageSyncProcessor(rsp *msg.GetMessageResponse, info *network.IncomingPacketInfo) {
+	c.sig.SyncCookie = rsp.SyncCookie
+	c.sig.PubAccountCookie = rsp.PubAccountCookie
+	// c.msgCtrlBuf = rsp.MsgCtrlBuf
 	if rsp.UinPairMsgs == nil {
 		return
 	}
@@ -106,13 +71,13 @@ func (c *QQClient) c2cMessageSyncProcessor(rsp *msg.GetMessageResponse, info *in
 		_, _ = c.sendAndWait(c.buildDeleteMessageRequestPacket(delItems))
 	}
 	if rsp.GetSyncFlag() != msg.SyncFlag_STOP {
-		c.Debug("continue sync with flag: %v", rsp.SyncFlag.String())
+		c.Debug("continue sync with flag: %v", rsp.SyncFlag)
 		seq, pkt := c.buildGetMessageRequestPacket(rsp.GetSyncFlag(), time.Now().Unix())
 		_, _ = c.sendAndWait(seq, pkt, info.Params)
 	}
 }
 
-func (c *QQClient) commMsgProcessor(pMsg *msg.Message, info *incomingPacketInfo) {
+func (c *QQClient) commMsgProcessor(pMsg *msg.Message, info *network.IncomingPacketInfo) {
 	strKey := fmt.Sprintf("%d%d%d%d", pMsg.Head.GetFromUin(), pMsg.Head.GetToUin(), pMsg.Head.GetMsgSeq(), pMsg.Head.GetMsgUid())
 	if _, ok := c.msgSvcCache.GetAndUpdate(strKey, time.Hour); ok {
 		c.Debug("c2c msg %v already exists in cache. skip.", pMsg.Head.GetMsgUid())
@@ -124,24 +89,24 @@ func (c *QQClient) commMsgProcessor(pMsg *msg.Message, info *incomingPacketInfo)
 		return
 	}
 	c.lastC2CMsgTime = int64(pMsg.Head.GetMsgTime())
-	if info.Params.bool("init") {
+	if info.Params.Bool("init") {
 		return
 	}
-	if decoder, ok := c2cDecoders[pMsg.Head.GetMsgType()]; ok {
+	if decoder, _ := peekC2CDecoder(pMsg.Head.GetMsgType()); decoder != nil {
 		decoder(c, pMsg, info)
 	} else {
 		c.Debug("unknown msg type on c2c processor: %v - %v", pMsg.Head.GetMsgType(), pMsg.Head.GetC2CCmd())
 	}
 }
 
-func privateMessageDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
+func privateMessageDecoder(c *QQClient, pMsg *msg.Message, _ *network.IncomingPacketInfo) {
 	switch pMsg.Head.GetC2CCmd() {
 	case 11, 175: // friend msg
 		if pMsg.Head.GetFromUin() == c.Uin {
 			for {
-				frdSeq := atomic.LoadInt32(&c.friendSeq)
+				frdSeq := c.friendSeq.Load()
 				if frdSeq < pMsg.Head.GetMsgSeq() {
-					if atomic.CompareAndSwapInt32(&c.friendSeq, frdSeq, pMsg.Head.GetMsgSeq()) {
+					if c.friendSeq.CAS(frdSeq, pMsg.Head.GetMsgSeq()) {
 						break
 					}
 				} else {
@@ -152,6 +117,20 @@ func privateMessageDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo
 		if pMsg.Body.RichText == nil || pMsg.Body.RichText.Elems == nil {
 			return
 		}
+
+		// handle fragmented message
+		if pMsg.Content != nil && pMsg.Content.GetPkgNum() > 1 {
+			seq := pMsg.Content.GetDivSeq()
+			builder := c.messageBuilder(seq)
+			builder.append(pMsg)
+			if builder.len() < pMsg.Content.GetPkgNum() {
+				// continue to receive other fragments
+				return
+			}
+			c.msgBuilders.Delete(seq)
+			pMsg = builder.build()
+		}
+
 		if pMsg.Head.GetFromUin() == c.Uin {
 			c.dispatchPrivateMessageSelf(c.parsePrivateMessage(pMsg))
 			return
@@ -162,7 +141,7 @@ func privateMessageDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo
 	}
 }
 
-func privatePttDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
+func privatePttDecoder(c *QQClient, pMsg *msg.Message, _ *network.IncomingPacketInfo) {
 	if pMsg.Body == nil || pMsg.Body.RichText == nil || pMsg.Body.RichText.Ptt == nil {
 		return
 	}
@@ -173,7 +152,7 @@ func privatePttDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
 	c.dispatchPrivateMessage(c.parsePrivateMessage(pMsg))
 }
 
-func tempSessionDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
+func tempSessionDecoder(c *QQClient, pMsg *msg.Message, _ *network.IncomingPacketInfo) {
 	if pMsg.Head.C2CTmpMsgHead == nil || pMsg.Body == nil {
 		return
 	}
@@ -194,7 +173,7 @@ func tempSessionDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
 			info := &TempSessionInfo{
 				Source: 0,
 				Sender: pMsg.Head.GetFromUin(),
-				sig:    pMsg.Head.C2CTmpMsgHead.GetSig(),
+				sig:    pMsg.Head.C2CTmpMsgHead.Sig,
 				client: c,
 			}
 
@@ -234,7 +213,7 @@ func tempSessionDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
 	}
 }
 
-func troopAddMemberBroadcastDecoder(c *QQClient, pMsg *msg.Message, _ *incomingPacketInfo) {
+func troopAddMemberBroadcastDecoder(c *QQClient, pMsg *msg.Message, _ *network.IncomingPacketInfo) {
 	groupJoinLock.Lock()
 	defer groupJoinLock.Unlock()
 	group := c.FindGroupByUin(pMsg.Head.GetFromUin())
@@ -261,19 +240,19 @@ func troopAddMemberBroadcastDecoder(c *QQClient, pMsg *msg.Message, _ *incomingP
 	}
 }
 
-func systemMessageDecoder(c *QQClient, _ *msg.Message, _ *incomingPacketInfo) {
+func systemMessageDecoder(c *QQClient, _ *msg.Message, _ *network.IncomingPacketInfo) {
 	_, pkt := c.buildSystemMsgNewFriendPacket()
-	_ = c.send(pkt)
+	_ = c.sendPacket(pkt)
 }
 
-func troopSystemMessageDecoder(c *QQClient, pMsg *msg.Message, info *incomingPacketInfo) {
-	if !info.Params.bool("used_reg_proxy") && pMsg.Head.GetMsgType() != 85 && pMsg.Head.GetMsgType() != 36 {
+func troopSystemMessageDecoder(c *QQClient, pMsg *msg.Message, info *network.IncomingPacketInfo) {
+	if !info.Params.Bool("used_reg_proxy") && pMsg.Head.GetMsgType() != 85 && pMsg.Head.GetMsgType() != 36 {
 		c.exceptAndDispatchGroupSysMsg()
 	}
-	if len(pMsg.Body.GetMsgContent()) == 0 {
+	if len(pMsg.Body.MsgContent) == 0 {
 		return
 	}
-	reader := binary.NewReader(pMsg.GetBody().GetMsgContent())
+	reader := binary.NewReader(pMsg.Body.MsgContent)
 	groupCode := uint32(reader.ReadInt32())
 	if info := c.FindGroup(int64(groupCode)); info != nil && pMsg.Head.GetGroupName() != "" && info.Name != pMsg.Head.GetGroupName() {
 		c.Debug("group %v name updated. %v -> %v", groupCode, info.Name, pMsg.Head.GetGroupName())
@@ -281,7 +260,7 @@ func troopSystemMessageDecoder(c *QQClient, pMsg *msg.Message, info *incomingPac
 	}
 }
 
-func msgType0x211Decoder(c *QQClient, pMsg *msg.Message, info *incomingPacketInfo) {
+func msgType0x211Decoder(c *QQClient, pMsg *msg.Message, info *network.IncomingPacketInfo) {
 	if pMsg.Head.GetC2CCmd() == 6 || pMsg.Head.C2CTmpMsgHead != nil {
 		tempSessionDecoder(c, pMsg, info)
 	}
@@ -291,7 +270,7 @@ func msgType0x211Decoder(c *QQClient, pMsg *msg.Message, info *incomingPacketInf
 		c.Error("unmarshal sub msg 0x4 error: %v", err)
 		return
 	}
-	if sub4.NotOnlineFile != nil && sub4.NotOnlineFile.GetSubcmd() == 1 { // subcmd: 1 -> send, 2-> recv
+	if sub4.NotOnlineFile != nil && sub4.NotOnlineFile.GetSubcmd() == 1 { // subcmd: 1 -> sendPacket, 2-> recv
 		rsp, err := c.sendAndWait(c.buildOfflineFileDownloadRequestPacket(sub4.NotOnlineFile.FileUuid)) // offline_file.go
 		if err != nil {
 			return

@@ -1,10 +1,11 @@
 package jce
 
 type IJceStruct interface {
-	// ToBytes() []byte
+	ToBytes() []byte
 	ReadFrom(*JceReader)
 }
 
+//go:generate go run github.com/Mrs4s/MiraiGo/internal/generator/jce_gen -file=structs.go -o structs_tobytes.go
 type (
 	RequestPacket struct {
 		IVersion     int16             `jceId:"1"`
@@ -74,7 +75,6 @@ type (
 	}
 
 	SvcReqRegister struct {
-		IJceStruct
 		Uin                int64  `jceId:"0"`
 		Bid                int64  `jceId:"1"`
 		ConnType           byte   `jceId:"2"`
@@ -139,7 +139,6 @@ type (
 	}
 
 	SvcReqRegisterNew struct {
-		IJceStruct
 		RequestOptional   int64      `jceId:"0"`
 		C2CMsg            IJceStruct `jceId:"1"` // SvcReqGetMsgV2
 		GroupMsg          IJceStruct `jceId:"2"` // SvcReqPullGroupMsgSeq
@@ -173,7 +172,6 @@ type (
 	}
 
 	PullGroupSeqParam struct {
-		IJceStruct
 		GroupCode int64 `jceId:"0"`
 		LastSeqId int64 `jceId:"1"`
 	}
@@ -251,7 +249,6 @@ type (
 	}
 
 	SvcRespPushMsg struct {
-		IJceStruct
 		Uin         int64        `jceId:"0"`
 		DelInfos    []IJceStruct `jceId:"1"`
 		Svrip       int32        `jceId:"2"`
@@ -299,7 +296,6 @@ type (
 	}
 
 	FriendListRequest struct {
-		IJceStruct
 		Reqtype         int32   `jceId:"0"`
 		IfReflush       byte    `jceId:"1"`
 		Uin             int64   `jceId:"2"`
@@ -381,7 +377,6 @@ type (
 	}
 
 	TroopListRequest struct {
-		IJceStruct
 		Uin              int64   `jceId:"0"`
 		GetMSFMsgFlag    byte    `jceId:"1"`
 		Cookies          []byte  `jceId:"2"`
@@ -432,7 +427,6 @@ type (
 	}
 
 	TroopMemberListRequest struct {
-		IJceStruct
 		Uin                int64 `jceId:"0"`
 		GroupCode          int64 `jceId:"1"`
 		NextUin            int64 `jceId:"2"`
@@ -482,7 +476,6 @@ type (
 	}
 
 	ModifyGroupCardRequest struct {
-		IJceStruct
 		Zero      int64        `jceId:"0"`
 		GroupCode int64        `jceId:"1"`
 		NewSeq    int64        `jceId:"2"`
@@ -501,7 +494,6 @@ type (
 	}
 
 	SummaryCardReq struct {
-		IJceStruct
 		Uin                int64 `jceId:"0"`
 		ComeFrom           int32 `jceId:"1"`
 		QzoneFeedTimestamp int64 `jceId:"2"`
@@ -523,7 +515,6 @@ type (
 	}
 
 	SummaryCardReqSearch struct {
-		IJceStruct
 		Keyword     string   `jceId:"0"`
 		CountryCode string   `jceId:"1"`
 		Version     int32    `jceId:"2"`
@@ -531,7 +522,6 @@ type (
 	}
 
 	DelFriendReq struct {
-		IJceStruct
 		Uin     int64 `jceId:"0"`
 		DelUin  int64 `jceId:"1"`
 		DelType byte  `jceId:"2"`
@@ -539,55 +529,27 @@ type (
 	}
 )
 
-func (pkt *RequestPacket) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
 func (pkt *RequestPacket) ReadFrom(r *JceReader) {
-	pkt.SBuffer = []byte{}
-	pkt.Context = make(map[string]string)
-	pkt.Status = make(map[string]string)
 	pkt.IVersion = r.ReadInt16(1)
 	pkt.CPacketType = r.ReadByte(2)
 	pkt.IMessageType = r.ReadInt32(3)
 	pkt.IRequestId = r.ReadInt32(4)
 	pkt.SServantName = r.ReadString(5)
 	pkt.SFuncName = r.ReadString(6)
-	r.ReadSlice(&pkt.SBuffer, 7)
+	pkt.SBuffer = r.ReadBytes(7)
 	pkt.ITimeout = r.ReadInt32(8)
-	r.ReadMapF(9, func(k interface{}, v interface{}) { pkt.Context[k.(string)] = v.(string) })
-	r.ReadMapF(10, func(k interface{}, v interface{}) { pkt.Status[k.(string)] = v.(string) })
-}
-
-func (pkt *RequestDataVersion3) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
+	// r.ReadMap(pkt.Context, 9)
+	pkt.Context = r.ReadMapStrStr(9)
+	// r.ReadMap(pkt.Status, 10)
+	pkt.Status = r.ReadMapStrStr(10)
 }
 
 func (pkt *RequestDataVersion3) ReadFrom(r *JceReader) {
-	pkt.Map = make(map[string][]byte)
-	r.ReadMapF(0, func(k interface{}, v interface{}) {
-		pkt.Map[k.(string)] = v.([]byte)
-	})
-}
-
-func (pkt *RequestDataVersion2) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
+	pkt.Map = r.ReadMapStrByte(0)
 }
 
 func (pkt *RequestDataVersion2) ReadFrom(r *JceReader) {
-	pkt.Map = make(map[string]map[string][]byte)
-	r.ReadMapF(0, func(k interface{}, v interface{}) {
-		pkt.Map[k.(string)] = make(map[string][]byte)
-		for k2, v := range v.(map[interface{}]interface{}) {
-			pkt.Map[k.(string)][k2.(string)] = v.([]byte)
-		}
-	})
+	pkt.Map = r.ReadMapStrMapStrByte(0)
 }
 
 func (pkt *SsoServerInfo) ReadFrom(r *JceReader) {
@@ -597,23 +559,16 @@ func (pkt *SsoServerInfo) ReadFrom(r *JceReader) {
 }
 
 func (pkt *FileStoragePushFSSvcList) ReadFrom(r *JceReader) {
-	pkt.UploadList = []FileStorageServerInfo{}
-	pkt.PicDownloadList = []FileStorageServerInfo{}
-	pkt.GPicDownloadList = []FileStorageServerInfo{}
-	pkt.QZoneProxyServiceList = []FileStorageServerInfo{}
-	pkt.UrlEncodeServiceList = []FileStorageServerInfo{}
+	pkt.UploadList = r.ReadFileStorageServerInfos(0)
+	pkt.PicDownloadList = r.ReadFileStorageServerInfos(1)
+	pkt.GPicDownloadList = r.ReadFileStorageServerInfos(2)
+	pkt.QZoneProxyServiceList = r.ReadFileStorageServerInfos(3)
+	pkt.UrlEncodeServiceList = r.ReadFileStorageServerInfos(4)
 	pkt.BigDataChannel = &BigDataChannel{}
-	pkt.VipEmotionList = []FileStorageServerInfo{}
-	pkt.C2CPicDownList = []FileStorageServerInfo{}
-	r.ReadSlice(&pkt.UploadList, 0)
-	r.ReadSlice(&pkt.PicDownloadList, 1)
-	r.ReadSlice(&pkt.GPicDownloadList, 2)
-	r.ReadSlice(&pkt.QZoneProxyServiceList, 3)
-	r.ReadSlice(&pkt.UrlEncodeServiceList, 4)
 	r.ReadJceStruct(pkt.BigDataChannel, 5)
-	r.ReadSlice(&pkt.VipEmotionList, 6)
-	r.ReadSlice(&pkt.C2CPicDownList, 7)
-	pkt.PttList = r.ReadAny(10).([]byte)
+	pkt.VipEmotionList = r.ReadFileStorageServerInfos(6)
+	pkt.C2CPicDownList = r.ReadFileStorageServerInfos(7)
+	pkt.PttList = r.ReadBytes(10)
 }
 
 func (pkt *FileStorageServerInfo) ReadFrom(r *JceReader) {
@@ -622,19 +577,17 @@ func (pkt *FileStorageServerInfo) ReadFrom(r *JceReader) {
 }
 
 func (pkt *BigDataChannel) ReadFrom(r *JceReader) {
-	pkt.IPLists = []BigDataIPList{}
-	r.ReadSlice(&pkt.IPLists, 0)
-	pkt.SigSession = r.ReadAny(1).([]byte)
-	pkt.KeySession = r.ReadAny(2).([]byte)
+	pkt.IPLists = r.ReadBigDataIPLists(0)
+	pkt.SigSession = r.ReadBytes(1)
+	pkt.KeySession = r.ReadBytes(2)
 	pkt.SigUin = r.ReadInt64(3)
 	pkt.ConnectFlag = r.ReadInt32(4)
-	pkt.PbBuf = r.ReadAny(5).([]byte)
+	pkt.PbBuf = r.ReadBytes(5)
 }
 
 func (pkt *BigDataIPList) ReadFrom(r *JceReader) {
-	pkt.IPList = []BigDataIPInfo{}
 	pkt.ServiceType = r.ReadInt64(0)
-	r.ReadSlice(&pkt.IPList, 1)
+	pkt.IPList = r.ReadBigDataIPInfos(1)
 	pkt.FragmentSize = r.ReadInt64(3)
 }
 
@@ -642,12 +595,6 @@ func (pkt *BigDataIPInfo) ReadFrom(r *JceReader) {
 	pkt.Type = r.ReadInt64(0)
 	pkt.Server = r.ReadString(1)
 	pkt.Port = r.ReadInt64(2)
-}
-
-func (pkt *SvcReqRegister) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
 }
 
 func (pkt *SvcRespRegister) ReadFrom(r *JceReader) {
@@ -666,27 +613,9 @@ func (pkt *SvcRespRegister) ReadFrom(r *JceReader) {
 	pkt.HelloInterval = r.ReadInt32(12)
 	pkt.LargeSeq = r.ReadInt32(13)
 	pkt.LargeSeqUpdate = r.ReadByte(14)
-	pkt.D769RspBody = r.ReadAny(15).([]byte)
+	pkt.D769RspBody = r.ReadBytes(15)
 	pkt.Status = r.ReadInt32(16)
 	pkt.ExtOnlineStatus = r.ReadInt64(17)
-}
-
-func (pkt *FriendListRequest) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *SummaryCardReq) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *SummaryCardReqSearch) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
 }
 
 func (pkt *FriendInfo) ReadFrom(r *JceReader) {
@@ -699,14 +628,7 @@ func (pkt *FriendInfo) ReadFrom(r *JceReader) {
 	pkt.Nick = r.ReadString(14)
 	pkt.Network = r.ReadByte(20)
 	pkt.NetworkType = r.ReadInt32(24)
-	pkt.CardID = []byte{}
-	r.ReadObject(&pkt.CardID, 41)
-}
-
-func (pkt *TroopListRequest) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
+	pkt.CardID = r.ReadBytes(41)
 }
 
 func (pkt *TroopNumber) ReadFrom(r *JceReader) {
@@ -717,12 +639,6 @@ func (pkt *TroopNumber) ReadFrom(r *JceReader) {
 	pkt.MemberNum = r.ReadInt64(19)
 	pkt.GroupOwnerUin = r.ReadInt64(23)
 	pkt.MaxGroupMemberNum = r.ReadInt64(29)
-}
-
-func (pkt *TroopMemberListRequest) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
 }
 
 func (pkt *TroopMemberInfo) ReadFrom(r *JceReader) {
@@ -739,6 +655,7 @@ func (pkt *TroopMemberInfo) ReadFrom(r *JceReader) {
 	pkt.Flag = r.ReadInt64(18)
 	pkt.SpecialTitle = r.ReadString(23)
 	pkt.SpecialTitleExpireTime = r.ReadInt64(24)
+	pkt.ShutUpTimestap = r.ReadInt64(30)
 }
 
 func (pkt *PushMessageInfo) ReadFrom(r *JceReader) {
@@ -747,8 +664,8 @@ func (pkt *PushMessageInfo) ReadFrom(r *JceReader) {
 	pkt.MsgType = r.ReadInt16(2)
 	pkt.MsgSeq = r.ReadInt16(3)
 	pkt.Msg = r.ReadString(4)
-	pkt.VMsg = r.ReadAny(6).([]byte)
-	pkt.MsgCookies = r.ReadAny(8).([]byte)
+	pkt.VMsg = r.ReadBytes(6)
+	pkt.MsgCookies = r.ReadBytes(8)
 	pkt.MsgUid = r.ReadInt64(10)
 	pkt.FromMobile = r.ReadString(16)
 	pkt.FromName = r.ReadString(17)
@@ -756,8 +673,7 @@ func (pkt *PushMessageInfo) ReadFrom(r *JceReader) {
 
 func (pkt *SvcDevLoginInfo) ReadFrom(r *JceReader) {
 	pkt.AppId = r.ReadInt64(0)
-	pkt.Guid = []byte{}
-	r.ReadSlice(&pkt.Guid, 1)
+	pkt.Guid = r.ReadBytes(1)
 	pkt.LoginTime = r.ReadInt64(2)
 	pkt.LoginPlatform = r.ReadInt64(3)
 	pkt.LoginLocation = r.ReadString(4)
@@ -769,7 +685,6 @@ func (pkt *SvcDevLoginInfo) ReadFrom(r *JceReader) {
 }
 
 func (pkt *SvcRespParam) ReadFrom(r *JceReader) {
-	pkt.OnlineInfos = []OnlineInfo{}
 	pkt.PCStat = r.ReadInt32(0)
 	pkt.IsSupportC2CRoamMsg = r.ReadInt32(1)
 	pkt.IsSupportDataLine = r.ReadInt32(2)
@@ -777,7 +692,7 @@ func (pkt *SvcRespParam) ReadFrom(r *JceReader) {
 	pkt.IsSupportViewPCFile = r.ReadInt32(4)
 	pkt.PcVersion = r.ReadInt32(5)
 	pkt.RoamFlag = r.ReadInt64(6)
-	r.ReadSlice(&pkt.OnlineInfos, 7)
+	pkt.OnlineInfos = r.ReadOnlineInfos(7)
 	pkt.PCClientType = r.ReadInt32(8)
 }
 
@@ -786,7 +701,7 @@ func (pkt *RequestPushNotify) ReadFrom(r *JceReader) {
 	pkt.Type = r.ReadByte(1)
 	pkt.Service = r.ReadString(2)
 	pkt.Cmd = r.ReadString(3)
-	pkt.NotifyCookie = r.ReadAny(4).([]byte)
+	pkt.NotifyCookie = r.ReadBytes(4)
 	pkt.MsgType = r.ReadInt32(5)
 	pkt.UserActive = r.ReadInt32(6)
 	pkt.GeneralFlag = r.ReadInt32(7)
@@ -798,12 +713,11 @@ func (pkt *OnlineInfo) ReadFrom(r *JceReader) {
 	pkt.ClientType = r.ReadInt32(1)
 	pkt.OnlineStatus = r.ReadInt32(2)
 	pkt.PlatformId = r.ReadInt32(3)
-	pkt.SubPlatform = string(r.ReadAny(4).([]byte))
+	pkt.SubPlatform = string(r.ReadBytes(4))
 	pkt.UClientType = r.ReadInt64(5)
 }
 
 func (pkt *SvcReqMSFLoginNotify) ReadFrom(r *JceReader) {
-	pkt.InstanceList = []InstanceInfo{}
 	pkt.AppId = r.ReadInt64(0)
 	pkt.Status = r.ReadByte(1)
 	pkt.Tablet = r.ReadByte(2)
@@ -812,7 +726,7 @@ func (pkt *SvcReqMSFLoginNotify) ReadFrom(r *JceReader) {
 	pkt.Info = r.ReadString(5)
 	pkt.ProductType = r.ReadInt64(6)
 	pkt.ClientType = r.ReadInt64(7)
-	r.ReadSlice(&pkt.InstanceList, 8)
+	pkt.InstanceList = r.ReadInstanceInfos(8)
 }
 
 func (pkt *InstanceInfo) ReadFrom(r *JceReader) {
@@ -821,34 +735,4 @@ func (pkt *InstanceInfo) ReadFrom(r *JceReader) {
 	pkt.Platform = r.ReadInt64(2)
 	pkt.ProductType = r.ReadInt64(3)
 	pkt.ClientType = r.ReadInt64(4)
-}
-
-func (pkt *SvcRespPushMsg) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *ModifyGroupCardRequest) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *SvcReqGetDevLoginInfo) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *SvcReqRegisterNew) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
-}
-
-func (pkt *DelFriendReq) ToBytes() []byte {
-	w := NewJceWriter()
-	w.WriteJceStructRaw(pkt)
-	return w.Bytes()
 }

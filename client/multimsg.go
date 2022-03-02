@@ -1,16 +1,22 @@
 package client
 
 import (
+	"bytes"
 	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/Mrs4s/MiraiGo/binary"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb/longmsg"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
 	"github.com/Mrs4s/MiraiGo/client/pb/multimsg"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
+	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 func init() {
@@ -20,7 +26,6 @@ func init() {
 
 // MultiMsg.ApplyUp
 func (c *QQClient) buildMultiApplyUpPacket(data, hash []byte, buType int32, groupUin int64) (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &multimsg.MultiReqBody{
 		Subcmd:       1,
 		TermType:     5,
@@ -38,12 +43,11 @@ func (c *QQClient) buildMultiApplyUpPacket(data, hash []byte, buType int32, grou
 		BuType: buType,
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "MultiMsg.ApplyUp", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("MultiMsg.ApplyUp", payload)
 }
 
 // MultiMsg.ApplyUp
-func decodeMultiApplyUpResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeMultiApplyUpResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	body := multimsg.MultiRspBody{}
 	if err := proto.Unmarshal(payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
@@ -63,7 +67,6 @@ func decodeMultiApplyUpResponse(_ *QQClient, _ *incomingPacketInfo, payload []by
 
 // MultiMsg.ApplyDown
 func (c *QQClient) buildMultiApplyDownPacket(resID string) (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &multimsg.MultiReqBody{
 		Subcmd:       2,
 		TermType:     5,
@@ -80,12 +83,11 @@ func (c *QQClient) buildMultiApplyDownPacket(resID string) (uint16, []byte) {
 		ReqChannelType: 2,
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "MultiMsg.ApplyDown", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("MultiMsg.ApplyDown", payload)
 }
 
 // MultiMsg.ApplyDown
-func decodeMultiApplyDownResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeMultiApplyDownResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	body := multimsg.MultiRspBody{}
 	if err := proto.Unmarshal(payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
@@ -94,12 +96,13 @@ func decodeMultiApplyDownResponse(_ *QQClient, _ *incomingPacketInfo, payload []
 		return nil, errors.New("not found")
 	}
 	rsp := body.MultimsgApplydownRsp[0]
-	prefix := func() string {
-		if rsp.MsgExternInfo != nil && rsp.MsgExternInfo.ChannelType == 2 {
-			return "https://ssl.htdata.qq.com"
-		}
-		return fmt.Sprintf("http://%s:%d", binary.UInt32ToIPV4Address(uint32(rsp.Uint32DownIp[0])), body.MultimsgApplydownRsp[0].Uint32DownPort[0])
-	}()
+
+	var prefix string
+	if rsp.MsgExternInfo != nil && rsp.MsgExternInfo.ChannelType == 2 {
+		prefix = "https://ssl.htdata.qq.com"
+	} else {
+		prefix = fmt.Sprintf("http://%s:%d", binary.UInt32ToIPV4Address(uint32(rsp.Uint32DownIp[0])), body.MultimsgApplydownRsp[0].Uint32DownPort[0])
+	}
 	b, err := utils.HttpGetBytes(fmt.Sprintf("%s%s", prefix, string(rsp.ThumbDownPara)), "")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to download by multi apply down")
@@ -129,4 +132,99 @@ func decodeMultiApplyDownResponse(_ *QQClient, _ *incomingPacketInfo, payload []
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
 	return &mt, nil
+}
+
+type forwardMsgLinker struct {
+	items map[string]*msg.PbMultiMsgItem
+}
+
+func (l *forwardMsgLinker) link(name string) *message.ForwardMessage {
+	item := l.items[name]
+	if item == nil {
+		return nil
+	}
+	nodes := make([]*message.ForwardNode, 0, len(item.Buffer.Msg))
+	for _, m := range item.Buffer.Msg {
+		name := m.Head.GetFromNick()
+		if m.Head.GetMsgType() == 82 && m.Head.GroupInfo != nil {
+			name = m.Head.GroupInfo.GetGroupCard()
+		}
+
+		msgElems := message.ParseMessageElems(m.Body.RichText.Elems)
+		for i, elem := range msgElems {
+			if forward, ok := elem.(*message.ForwardElement); ok {
+				if forward.FileName != "" {
+					msgElems[i] = l.link(forward.FileName) // 递归处理嵌套转发
+				}
+			}
+		}
+
+		nodes = append(nodes, &message.ForwardNode{
+			SenderId:   m.Head.GetFromUin(),
+			SenderName: name,
+			Time:       m.Head.GetMsgTime(),
+			Message:    msgElems,
+		})
+	}
+	return &message.ForwardMessage{Nodes: nodes}
+}
+
+func (c *QQClient) GetForwardMessage(resID string) *message.ForwardMessage {
+	m := c.DownloadForwardMessage(resID)
+	if m == nil {
+		return nil
+	}
+	linker := forwardMsgLinker{
+		items: make(map[string]*msg.PbMultiMsgItem),
+	}
+	for _, item := range m.Items {
+		linker.items[item.GetFileName()] = item
+	}
+	return linker.link(m.FileName)
+}
+
+func (c *QQClient) DownloadForwardMessage(resId string) *message.ForwardElement {
+	i, err := c.sendAndWait(c.buildMultiApplyDownPacket(resId))
+	if err != nil {
+		return nil
+	}
+	multiMsg := i.(*msg.PbMultiMsgTransmit)
+	if multiMsg.PbItemList == nil {
+		return nil
+	}
+	var pv bytes.Buffer
+	for i := 0; i < int(math.Min(4, float64(len(multiMsg.Msg)))); i++ {
+		m := multiMsg.Msg[i]
+		sender := m.Head.GetFromNick()
+		if m.Head.GetMsgType() == 82 && m.Head.GroupInfo != nil {
+			sender = m.Head.GroupInfo.GetGroupCard()
+		}
+		brief := message.ToReadableString(message.ParseMessageElems(multiMsg.Msg[i].Body.RichText.Elems))
+		fmt.Fprintf(&pv, `<title size="26" color="#777777">%s: %s</title>`, sender, brief)
+	}
+	return genForwardTemplate(
+		resId, pv.String(),
+		fmt.Sprintf("查看 %d 条转发消息", len(multiMsg.Msg)),
+		time.Now().UnixNano(),
+		multiMsg.PbItemList,
+	)
+}
+
+func forwardDisplay(resID, fileName, preview, summary string) string {
+	sb := strings.Builder{}
+	sb.WriteString(`<?xml version='1.0' encoding='UTF-8'?><msg serviceID="35" templateID="1" action="viewMultiMsg" brief="[聊天记录]" `)
+	if resID != "" {
+		sb.WriteString(`m_resid="`)
+		sb.WriteString(resID)
+		sb.WriteString("\" ")
+	}
+	sb.WriteString(`m_fileName="`)
+	sb.WriteString(fileName)
+	sb.WriteString(`" tSum="3" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="0"><item layout="1"><title color="#000000" size="34">群聊的聊天记录</title> `)
+	sb.WriteString(preview)
+	sb.WriteString(`<hr></hr><summary size="26" color="#808080">`)
+	sb.WriteString(summary)
+	// todo: 私聊的聊天记录？
+	sb.WriteString(`</summary></item><source name="群聊的聊天记录"></source></msg>`)
+	return sb.String()
 }

@@ -1,9 +1,11 @@
 package client
 
 import (
-	"github.com/Mrs4s/MiraiGo/binary/jce"
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/pkg/errors"
+
+	"github.com/Mrs4s/MiraiGo/binary/jce"
+	"github.com/Mrs4s/MiraiGo/client/internal/auth"
+	"github.com/Mrs4s/MiraiGo/message"
 )
 
 var (
@@ -21,7 +23,7 @@ type (
 
 	UserOnlineStatus int
 
-	ClientProtocol int
+	ClientProtocol = auth.Protocol
 
 	LoginResponse struct {
 		Success bool
@@ -176,6 +178,7 @@ type (
 	LogEvent struct {
 		Type    string
 		Message string
+		Dump    []byte
 	}
 
 	ServerUpdatedEvent struct {
@@ -195,13 +198,13 @@ type (
 
 	// GroupDigest 群精华消息
 	GroupDigest struct {
-		GroupCode         string `json:"group_code"`
+		GroupCode         int64  `json:"group_code,string"`
 		MessageID         uint32 `json:"msg_seq"`
 		InternalMessageID uint32 `json:"msg_random"`
-		SenderUin         string `json:"sender_uin"`
+		SenderUin         int64  `json:"sender_uin,string"`
 		SenderNick        string `json:"sender_nick"`
 		SenderTime        int64  `json:"sender_time"`
-		AddDigestUin      string `json:"add_digest_uin"`
+		AddDigestUin      int64  `json:"add_digest_uin,string"`
 		AddDigestNick     string `json:"add_digest_nick"`
 		AddDigestTime     int64  `json:"add_digest_time"`
 	}
@@ -217,6 +220,43 @@ type (
 		OperatorUin       int64
 		SenderNick        string
 		OperatorNick      string
+	}
+
+	GuildMessageReactionsUpdatedEvent struct {
+		OperatorId uint64 // OperatorId 操作者TinyId, 删除贴表情的事件下不会有值
+		EmojiId    int32  // EmojiId 被贴的表情, 只有自身消息被贴表情才会有值
+		GuildId    uint64
+		ChannelId  uint64
+		MessageId  uint64
+		// MessageSenderUin int64 // MessageSenderUin 被贴表情的消息发送者QQ号
+		CurrentReactions []*message.GuildMessageEmojiReaction
+	}
+
+	GuildChannelUpdatedEvent struct {
+		OperatorId     uint64
+		GuildId        uint64
+		ChannelId      uint64
+		OldChannelInfo *ChannelInfo
+		NewChannelInfo *ChannelInfo
+	}
+
+	GuildMessageRecalledEvent struct {
+		OperatorId uint64
+		GuildId    uint64
+		ChannelId  uint64
+		MessageId  uint64
+		RecallTime int64
+	}
+
+	GuildChannelOperationEvent struct {
+		OperatorId  uint64
+		GuildId     uint64
+		ChannelInfo *ChannelInfo
+	}
+
+	MemberJoinGuildEvent struct {
+		Guild  *GuildInfo
+		Member *GuildMemberInfo
 	}
 
 	OcrResponse struct {
@@ -244,33 +284,6 @@ type (
 	groupMemberListResponse struct {
 		NextUin int64
 		list    []*GroupMemberInfo
-	}
-
-	imageUploadResponse struct {
-		UploadKey  []byte
-		UploadIp   []int32
-		UploadPort []int32
-		ResourceId string
-		Message    string
-		FileId     int64
-		Width      int32
-		Height     int32
-		ResultCode int32
-		IsExists   bool
-	}
-
-	pttUploadResponse struct {
-		ResultCode int32
-		Message    string
-
-		IsExists bool
-
-		ResourceId string
-		UploadKey  []byte
-		UploadIp   []string
-		UploadPort []int32
-		FileKey    []byte
-		FileId     int64
 	}
 
 	groupMessageReceiptEvent struct {
@@ -331,11 +344,12 @@ const (
 	Administrator MemberPermission = 2
 	Member        MemberPermission = 3
 
-	AndroidPhone ClientProtocol = 1
-	IPad         ClientProtocol = 2
-	AndroidWatch ClientProtocol = 3
-	MacOS        ClientProtocol = 4
-	QiDian       ClientProtocol = 5
+	Unset        = auth.Unset
+	AndroidPhone = auth.AndroidPhone
+	AndroidWatch = auth.AndroidWatch
+	MacOS        = auth.MacOS
+	QiDian       = auth.QiDian
+	IPad         = auth.IPad
 )
 
 func (r *UserJoinGroupRequest) Accept() {

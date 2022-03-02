@@ -1,14 +1,14 @@
 package client
 
 import (
-	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
-	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
+
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
+	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 )
 
 func (c *QQClient) buildTranslatePacket(src, dst, text string) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.TranslateReqBody{
 		BatchTranslateReq: &oidb.BatchTranslateReq{
 			SrcLanguage: src,
@@ -23,8 +23,7 @@ func (c *QQClient) buildTranslatePacket(src, dst, text string) (uint16, []byte) 
 		Bodybuffer:  b,
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x990", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x990", payload)
 }
 
 func (c *QQClient) Translate(src, dst, text string) (string, error) {
@@ -42,7 +41,7 @@ func (c *QQClient) Translate(src, dst, text string) (string, error) {
 }
 
 // OidbSvc.0x990
-func decodeTranslateResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeTranslateResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.TranslateRspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {

@@ -1,20 +1,22 @@
 // 企点协议相关特殊逻辑
+
 package client
 
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
+	"github.com/pkg/errors"
+
 	"github.com/Mrs4s/MiraiGo/binary"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb/cmd0x3f6"
 	"github.com/Mrs4s/MiraiGo/client/pb/cmd0x6ff"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/golang/protobuf/proto"
-	"github.com/pkg/errors"
 )
 
 func init() {
@@ -62,7 +64,6 @@ func (c *QQClient) getQiDianAddressDetailList() ([]*FriendInfo, error) {
 }
 
 func (c *QQClient) buildLoginExtraPacket() (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &cmd0x3f6.C3F6ReqBody{
 		SubCmd: proto.Uint32(69),
 		CrmCommonHead: &cmd0x3f6.C3F6CRMMsgHead{
@@ -77,20 +78,18 @@ func (c *QQClient) buildLoginExtraPacket() (uint16, []byte) {
 			TerminalType: proto.Uint32(2),
 			Status:       proto.Uint32(10),
 			LoginTime:    proto.Uint32(5),
-			HardwareInfo: proto.String(string(SystemDeviceInfo.Model)),
-			SoftwareInfo: proto.String(string(SystemDeviceInfo.Version.Release)),
-			Guid:         SystemDeviceInfo.Guid,
+			HardwareInfo: proto.String(string(c.deviceInfo.Model)),
+			SoftwareInfo: proto.String(string(c.deviceInfo.Version.Release)),
+			Guid:         c.deviceInfo.Guid,
 			AppName:      &c.version.ApkId,
 			SubAppId:     &c.version.AppId,
 		},
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "qidianservice.69", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("qidianservice.69", payload)
 }
 
 func (c *QQClient) buildConnKeyRequestPacket() (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &cmd0x6ff.C501ReqBody{
 		ReqBody: &cmd0x6ff.SubCmd0X501ReqBody{
 			Uin:          proto.Uint64(uint64(c.Uin)),
@@ -102,8 +101,7 @@ func (c *QQClient) buildConnKeyRequestPacket() (uint16, []byte) {
 		},
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "HttpConn.0x6ff_501", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("HttpConn.0x6ff_501", payload)
 }
 
 func (c *QQClient) bigDataRequest(subCmd uint32, req proto.Message) ([]byte, error) {
@@ -143,7 +141,8 @@ func (c *QQClient) bigDataRequest(subCmd uint32, req proto.Message) ([]byte, err
 	if err != nil {
 		return nil, errors.Wrap(err, "request error")
 	}
-	rspBody, _ := ioutil.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	rspBody, _ := io.ReadAll(rsp.Body)
 	r := binary.NewReader(rspBody)
 	r.ReadByte()
 	l1 := int(r.ReadInt32())
@@ -153,7 +152,7 @@ func (c *QQClient) bigDataRequest(subCmd uint32, req proto.Message) ([]byte, err
 	return tea.Decrypt(payload), nil
 }
 
-func decodeLoginExtraResponse(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeLoginExtraResponse(c *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	rsp := cmd0x3f6.C3F6RspBody{}
 	if err := proto.Unmarshal(payload, &rsp); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
@@ -169,7 +168,7 @@ func decodeLoginExtraResponse(c *QQClient, _ *incomingPacketInfo, payload []byte
 	return nil, nil
 }
 
-func decodeConnKeyResponse(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeConnKeyResponse(c *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	rsp := cmd0x6ff.C501RspBody{}
 	if err := proto.Unmarshal(payload, &rsp); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")

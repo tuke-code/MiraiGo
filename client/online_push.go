@@ -5,15 +5,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client/pb/msgtype0x210"
-
 	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/binary/jce"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb"
+	"github.com/Mrs4s/MiraiGo/client/pb/msgtype0x210"
 	"github.com/Mrs4s/MiraiGo/client/pb/notify"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 )
 
 var msg0x210Decoders = map[int64]func(*QQClient, []byte) error{
@@ -23,16 +23,15 @@ var msg0x210Decoders = map[int64]func(*QQClient, []byte) error{
 }
 
 // OnlinePush.ReqPush
-func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOnlinePushReqPacket(c *QQClient, info *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	request := &jce.RequestPacket{}
 	request.ReadFrom(jce.NewJceReader(payload))
 	data := &jce.RequestDataVersion2{}
 	data.ReadFrom(jce.NewJceReader(request.SBuffer))
 	jr := jce.NewJceReader(data.Map["req"]["OnlinePushPack.SvcReqPushMsg"][1:])
-	msgInfos := []jce.PushMessageInfo{}
 	uin := jr.ReadInt64(0)
-	jr.ReadSlice(&msgInfos, 2)
-	_ = c.send(c.buildDeleteOnlinePushPacket(uin, 0, nil, info.SequenceId, msgInfos))
+	msgInfos := jr.ReadPushMessageInfos(2)
+	_ = c.sendPacket(c.buildDeleteOnlinePushPacket(uin, 0, nil, info.SequenceId, msgInfos))
 	for _, m := range msgInfos {
 		k := fmt.Sprintf("%v%v%v", m.MsgSeq, m.MsgTime, m.MsgUid)
 		if _, ok := c.onlinePushCache.Get(k); ok {
@@ -42,7 +41,7 @@ func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []
 		// 0x2dc
 		if m.MsgType == 732 {
 			r := binary.NewReader(m.VMsg)
-			groupID := int64(uint32(r.ReadInt32()))
+			groupCode := int64(uint32(r.ReadInt32()))
 			iType := r.ReadByte()
 			r.ReadByte()
 			switch iType {
@@ -55,7 +54,7 @@ func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []
 				target := int64(uint32(r.ReadInt32()))
 				t := r.ReadInt32()
 				c.dispatchGroupMuteEvent(&GroupMuteEvent{
-					GroupCode:   groupID,
+					GroupCode:   groupCode,
 					OperatorUin: operator,
 					TargetUin:   target,
 					Time:        t,
@@ -70,7 +69,7 @@ func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []
 							continue
 						}
 						c.dispatchGroupMessageRecalledEvent(&GroupMessageRecalledEvent{
-							GroupCode:   groupID,
+							GroupCode:   groupCode,
 							OperatorUin: b.OptMsgRecall.Uin,
 							AuthorUin:   rm.AuthorUin,
 							MessageId:   rm.Seq,
@@ -79,12 +78,12 @@ func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []
 					}
 				}
 				if b.OptGeneralGrayTip != nil {
-					c.grayTipProcessor(groupID, b.OptGeneralGrayTip)
+					c.grayTipProcessor(groupCode, b.OptGeneralGrayTip)
 				}
 				if b.OptMsgRedTips != nil {
 					if b.OptMsgRedTips.LuckyFlag == 1 { // 运气王提示
 						c.dispatchGroupNotifyEvent(&GroupRedBagLuckyKingNotifyEvent{
-							GroupCode: groupID,
+							GroupCode: groupCode,
 							Sender:    int64(b.OptMsgRedTips.SenderUin),
 							LuckyKing: int64(b.OptMsgRedTips.LuckyUin),
 						})
@@ -104,14 +103,17 @@ func decodeOnlinePushReqPacket(c *QQClient, info *incomingPacketInfo, payload []
 						OperatorNick:      string(digest.OperNick),
 					})
 				}
+				if b.OptMsgGrayTips != nil {
+					c.msgGrayTipProcessor(groupCode, b.OptMsgGrayTips)
+				}
 			}
 		}
 		// 0x210
 		if m.MsgType == 528 {
 			vr := jce.NewJceReader(m.VMsg)
 			subType := vr.ReadInt64(0)
-			protobuf := vr.ReadAny(10).([]byte)
 			if decoder, ok := msg0x210Decoders[subType]; ok {
+				protobuf := vr.ReadBytes(10)
 				if err := decoder(c, protobuf); err != nil {
 					return nil, errors.Wrap(err, "decode online push 0x210 error")
 				}
@@ -182,7 +184,7 @@ func msgType0x210Sub27Decoder(c *QQClient, protobuf []byte) error {
 				if info.GetField() == 1 {
 					if g := c.FindGroup(int64(m.ModGroupProfile.GetGroupCode())); g != nil {
 						old := g.Name
-						g.Name = string(info.GetValue())
+						g.Name = string(info.Value)
 						c.dispatchGroupNameUpdatedEvent(&GroupNameUpdatedEvent{
 							Group:       g,
 							OldName:     old,
@@ -208,10 +210,12 @@ func msgType0x210Sub27Decoder(c *QQClient, protobuf []byte) error {
 func msgType0x210Sub122Decoder(c *QQClient, protobuf []byte) error {
 	t := &notify.GeneralGrayTipInfo{}
 	_ = proto.Unmarshal(protobuf, t)
-	var sender int64
+	var sender, receiver int64
 	for _, templ := range t.MsgTemplParam {
 		if templ.Name == "uin_str1" {
 			sender, _ = strconv.ParseInt(templ.Value, 10, 64)
+		} else if templ.Name == "uin_str2" {
+			receiver, _ = strconv.ParseInt(templ.Value, 10, 64)
 		}
 	}
 	if sender == 0 {
@@ -219,7 +223,7 @@ func msgType0x210Sub122Decoder(c *QQClient, protobuf []byte) error {
 	}
 	c.dispatchFriendNotifyEvent(&FriendPokeNotifyEvent{
 		Sender:   sender,
-		Receiver: c.Uin,
+		Receiver: receiver,
 	})
 	return nil
 }
@@ -229,35 +233,37 @@ func msgType0x210Sub44Decoder(c *QQClient, protobuf []byte) error {
 	if err := proto.Unmarshal(protobuf, &s44); err != nil {
 		return errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
-	if s44.GroupSyncMsg != nil {
-		func() {
-			groupJoinLock.Lock()
-			defer groupJoinLock.Unlock()
-			if s44.GroupSyncMsg.GetGrpCode() != 0 { // member sync
-				c.Debug("syncing members.")
-				if group := c.FindGroup(s44.GroupSyncMsg.GetGrpCode()); group != nil {
-					group.Update(func(_ *GroupInfo) {
-						var lastJoinTime int64 = 0
-						for _, m := range group.Members {
-							if lastJoinTime < m.JoinTime {
-								lastJoinTime = m.JoinTime
-							}
-						}
-						if newMem, err := c.GetGroupMembers(group); err == nil {
-							group.Members = newMem
-							for _, m := range newMem {
-								if lastJoinTime < m.JoinTime {
-									go c.dispatchNewMemberEvent(&MemberJoinGroupEvent{
-										Group:  group,
-										Member: m,
-									})
-								}
-							}
-						}
+	if s44.GroupSyncMsg == nil {
+		return nil
+	}
+	groupJoinLock.Lock()
+	defer groupJoinLock.Unlock()
+	if s44.GroupSyncMsg.GrpCode == 0 { // member sync
+		return errors.New("invalid group code")
+	}
+	c.Debug("syncing members.")
+	if group := c.FindGroup(s44.GroupSyncMsg.GrpCode); group != nil {
+		group.lock.Lock()
+		defer group.lock.Unlock()
+
+		var lastJoinTime int64 = 0
+		for _, m := range group.Members {
+			if lastJoinTime < m.JoinTime {
+				lastJoinTime = m.JoinTime
+			}
+		}
+
+		if newMem, err := c.GetGroupMembers(group); err == nil {
+			group.Members = newMem
+			for _, m := range newMem {
+				if lastJoinTime < m.JoinTime {
+					go c.dispatchNewMemberEvent(&MemberJoinGroupEvent{
+						Group:  group,
+						Member: m,
 					})
 				}
 			}
-		}()
+		}
 	}
 	return nil
 }

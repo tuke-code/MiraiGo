@@ -1,21 +1,25 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
+
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/binary/jce"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
 	"github.com/Mrs4s/MiraiGo/client/pb/profilecard"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 type (
@@ -49,6 +53,7 @@ type (
 		LastSpeakTime          int64
 		SpecialTitle           string
 		SpecialTitleExpireTime int64
+		ShutUpTimestamp        int64
 		Permission             MemberPermission
 	}
 
@@ -75,7 +80,6 @@ func (c *QQClient) GetGroupInfo(groupCode int64) (*GroupInfo, error) {
 
 // OidbSvc.0x88d_0
 func (c *QQClient) buildGroupInfoRequestPacket(groupCode int64) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D88DReqBody{
 		AppId: proto.Uint32(c.version.AppId),
 		ReqGroupInfo: []*oidb.ReqGroupInfo{
@@ -118,8 +122,7 @@ func (c *QQClient) buildGroupInfoRequestPacket(groupCode int64) (uint16, []byte)
 		Bodybuffer: b,
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x88d_0", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x88d_0", payload)
 }
 
 // SearchGroupByKeyword 通过关键词搜索陌生群组
@@ -133,7 +136,6 @@ func (c *QQClient) SearchGroupByKeyword(keyword string) ([]GroupSearchInfo, erro
 
 // SummaryCard.ReqSearch
 func (c *QQClient) buildGroupSearchPacket(keyword string) (uint16, []byte) {
-	seq := c.nextSeq()
 	comm, _ := proto.Marshal(&profilecard.BusiComm{
 		Ver:      proto.Int32(1),
 		Seq:      proto.Int32(rand.Int31()),
@@ -182,12 +184,11 @@ func (c *QQClient) buildGroupSearchPacket(keyword string) (uint16, []byte) {
 		Context:      make(map[string]string),
 		Status:       make(map[string]string),
 	}
-	packet := packets.BuildUniPacket(c.Uin, seq, "SummaryCard.ReqSearch", 1, c.OutGoingPacketSessionId, []byte{}, c.sigInfo.d2Key, pkt.ToBytes())
-	return seq, packet
+	return c.uniPacket("SummaryCard.ReqSearch", pkt.ToBytes())
 }
 
 // SummaryCard.ReqSearch
-func decodeGroupSearchResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeGroupSearchResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	request := &jce.RequestPacket{}
 	request.ReadFrom(jce.NewJceReader(payload))
 	data := &jce.RequestDataVersion2{}
@@ -197,7 +198,8 @@ func decodeGroupSearchResponse(_ *QQClient, _ *incomingPacketInfo, payload []byt
 	}
 	rsp := data.Map["RespSearch"]["SummaryCard.RespSearch"][1:]
 	r := jce.NewJceReader(rsp)
-	rspService := r.ReadAny(2).([]interface{})[0].([]byte)
+	// rspService := r.ReadAny(2).([]interface{})[0].([]byte)
+	rspService := r.ReadByteArrArr(2)[0]
 	sr := binary.NewReader(rspService)
 	sr.ReadByte()
 	ld1 := sr.ReadInt32()
@@ -211,7 +213,7 @@ func decodeGroupSearchResponse(_ *QQClient, _ *incomingPacketInfo, payload []byt
 			return nil, errors.Wrap(err, "get search result failed")
 		}
 		var ret []GroupSearchInfo
-		for _, g := range searchRsp.GetList() {
+		for _, g := range searchRsp.List {
 			ret = append(ret, GroupSearchInfo{
 				Code: int64(g.GetCode()),
 				Name: g.GetName(),
@@ -224,7 +226,7 @@ func decodeGroupSearchResponse(_ *QQClient, _ *incomingPacketInfo, payload []byt
 }
 
 // OidbSvc.0x88d_0
-func decodeGroupInfoResponse(c *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeGroupInfoResponse(c *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D88DRspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -254,6 +256,20 @@ func decodeGroupInfoResponse(c *QQClient, _ *incomingPacketInfo, payload []byte)
 		LastMsgSeq:      int64(info.GroupInfo.GetGroupCurMsgSeq()),
 		client:          c,
 	}, nil
+}
+
+func (c *QQClient) uploadGroupHeadPortrait(groupCode int64, img []byte) error {
+	url := fmt.Sprintf("http://htdata3.qq.com/cgi-bin/httpconn?htcmd=0x6ff0072&ver=5520&ukey=%v&range=0&uin=%v&seq=23&groupuin=%v&filetype=3&imagetype=5&userdata=0&subcmd=1&subver=101&clip=0_0_0_0&filesize=%v",
+		c.getSKey(), c.Uin, groupCode, len(img))
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(img))
+	req.Header["User-Agent"] = []string{"Dalvik/2.1.0 (Linux; U; Android 7.1.2; PCRT00 Build/N2G48H)"}
+	req.Header["Content-Type"] = []string{"multipart/form-data;boundary=****"}
+	rsp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return errors.Wrap(err, "failed to upload group head portrait")
+	}
+	rsp.Body.Close()
+	return nil
 }
 
 func (g *GroupInfo) UpdateName(newName string) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strings"
 )
@@ -21,10 +20,10 @@ var client = &http.Client{
 // HttpGetBytes 带 cookie 的 GET 请求
 func HttpGetBytes(url, cookie string) ([]byte, error) {
 	body, err := HTTPGetReadCloser(url, cookie)
-	defer func() { _ = body.Close() }()
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = body.Close() }()
 	return io.ReadAll(body)
 }
 
@@ -40,7 +39,7 @@ func HttpPostBytes(url string, data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +47,7 @@ func HttpPostBytes(url string, data []byte) ([]byte, error) {
 		buffer := bytes.NewBuffer(body)
 		r, _ := gzip.NewReader(buffer)
 		defer r.Close()
-		unCom, err := ioutil.ReadAll(r)
+		unCom, err := io.ReadAll(r)
 		return unCom, err
 	}
 	return body, nil
@@ -73,7 +72,7 @@ func HttpPostBytesWithCookie(url string, data []byte, cookie string, contentType
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +80,7 @@ func HttpPostBytesWithCookie(url string, data []byte, cookie string, contentType
 		buffer := bytes.NewBuffer(body)
 		r, _ := gzip.NewReader(buffer)
 		defer r.Close()
-		unCom, err := ioutil.ReadAll(r)
+		unCom, err := io.ReadAll(r)
 		return unCom, err
 	}
 	return body, nil

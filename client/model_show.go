@@ -1,12 +1,13 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
+	"github.com/tidwall/gjson"
 
 	"github.com/Mrs4s/MiraiGo/utils"
 )
@@ -41,7 +42,7 @@ type (
 )
 
 func (c *QQClient) getGtk(domain string) int {
-	if psKey, ok := c.sigInfo.psKeyMap[domain]; ok {
+	if psKey, ok := c.sig.PsKeyMap[domain]; ok {
 		accu := 5381
 		for _, b := range psKey {
 			accu = accu + (accu << 5) + int(b)
@@ -59,7 +60,7 @@ func (c *QQClient) GetModelShow(modelName string) ([]*ModelVariant, error) {
 				Uin:            c.Uin,
 				Model:          strings.ReplaceAll(url.QueryEscape(modelName), "+", "%20"),
 				AppType:        0,
-				IMei:           SystemDeviceInfo.IMEI,
+				IMei:           c.deviceInfo.IMEI,
 				ShowInfo:       true,
 				ModelShow:      "",
 				RecoverDefault: false,
@@ -78,16 +79,14 @@ func (c *QQClient) GetModelShow(modelName string) ([]*ModelVariant, error) {
 		return nil, err
 	}
 
-	items := jsoniter.Get(b, "13030", "data", "rsp", "vItemList")
-	size := items.Size()
-	variants := make([]*ModelVariant, size)
-	for i := 0; i < size; i++ {
-		item := items.Get(i)
-		variants[i] = &ModelVariant{
-			ModelShow: item.Get("sModelShow").ToString(),
-			NeedPay:   item.Get("bNeedPay").ToBool(),
-		}
-	}
+	variants := make([]*ModelVariant, 0)
+	gjson.ParseBytes(b).Get("13030.data.rsp.vItemList").ForEach(func(_, value gjson.Result) bool {
+		variants = append(variants, &ModelVariant{
+			ModelShow: value.Get("sModelShow").String(),
+			NeedPay:   value.Get("bNeedPay").Bool(),
+		})
+		return true
+	})
 	return variants, nil
 }
 
@@ -98,7 +97,7 @@ func (c *QQClient) SetModelShow(modelName string, modelShow string) error {
 				Uin:            c.Uin,
 				Model:          strings.ReplaceAll(url.QueryEscape(modelName), "+", "%20"),
 				AppType:        0,
-				IMei:           SystemDeviceInfo.IMEI,
+				IMei:           c.deviceInfo.IMEI,
 				ShowInfo:       true,
 				ModelShow:      strings.ReplaceAll(url.QueryEscape(modelShow), "+", "%20"),
 				RecoverDefault: modelShow == "",

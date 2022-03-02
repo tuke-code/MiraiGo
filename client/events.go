@@ -9,34 +9,42 @@ import (
 )
 
 type eventHandlers struct {
-	privateMessageHandlers           []func(*QQClient, *message.PrivateMessage)
-	tempMessageHandlers              []func(*QQClient, *TempMessageEvent)
-	groupMessageHandlers             []func(*QQClient, *message.GroupMessage)
-	selfPrivateMessageHandlers       []func(*QQClient, *message.PrivateMessage)
-	selfGroupMessageHandlers         []func(*QQClient, *message.GroupMessage)
-	groupMuteEventHandlers           []func(*QQClient, *GroupMuteEvent)
-	groupRecalledHandlers            []func(*QQClient, *GroupMessageRecalledEvent)
-	friendRecalledHandlers           []func(*QQClient, *FriendMessageRecalledEvent)
-	joinGroupHandlers                []func(*QQClient, *GroupInfo)
-	leaveGroupHandlers               []func(*QQClient, *GroupLeaveEvent)
-	memberJoinedHandlers             []func(*QQClient, *MemberJoinGroupEvent)
-	memberLeavedHandlers             []func(*QQClient, *MemberLeaveGroupEvent)
-	memberCardUpdatedHandlers        []func(*QQClient, *MemberCardUpdatedEvent)
-	groupNameUpdatedHandlers         []func(*QQClient, *GroupNameUpdatedEvent)
-	permissionChangedHandlers        []func(*QQClient, *MemberPermissionChangedEvent)
-	groupInvitedHandlers             []func(*QQClient, *GroupInvitedRequest)
-	joinRequestHandlers              []func(*QQClient, *UserJoinGroupRequest)
-	friendRequestHandlers            []func(*QQClient, *NewFriendRequest)
-	newFriendHandlers                []func(*QQClient, *NewFriendEvent)
-	disconnectHandlers               []func(*QQClient, *ClientDisconnectedEvent)
-	logHandlers                      []func(*QQClient, *LogEvent)
-	serverUpdatedHandlers            []func(*QQClient, *ServerUpdatedEvent) bool
-	groupNotifyHandlers              []func(*QQClient, INotifyEvent)
-	friendNotifyHandlers             []func(*QQClient, INotifyEvent)
-	offlineFileHandlers              []func(*QQClient, *OfflineFileEvent)
-	otherClientStatusChangedHandlers []func(*QQClient, *OtherClientStatusChangedEvent)
-	groupDigestHandlers              []func(*QQClient, *GroupDigestEvent)
-	groupMessageReceiptHandlers      sync.Map
+	privateMessageHandlers               []func(*QQClient, *message.PrivateMessage)
+	tempMessageHandlers                  []func(*QQClient, *TempMessageEvent)
+	groupMessageHandlers                 []func(*QQClient, *message.GroupMessage)
+	selfPrivateMessageHandlers           []func(*QQClient, *message.PrivateMessage)
+	selfGroupMessageHandlers             []func(*QQClient, *message.GroupMessage)
+	guildChannelMessageHandlers          []func(*QQClient, *message.GuildChannelMessage)
+	guildMessageReactionsUpdatedHandlers []func(*QQClient, *GuildMessageReactionsUpdatedEvent)
+	guildMessageRecalledHandlers         []func(*QQClient, *GuildMessageRecalledEvent)
+	guildChannelUpdatedHandlers          []func(*QQClient, *GuildChannelUpdatedEvent)
+	guildChannelCreatedHandlers          []func(*QQClient, *GuildChannelOperationEvent)
+	guildChannelDestroyedHandlers        []func(*QQClient, *GuildChannelOperationEvent)
+	memberJoinedGuildHandlers            []func(*QQClient, *MemberJoinGuildEvent)
+	groupMuteEventHandlers               []func(*QQClient, *GroupMuteEvent)
+	groupRecalledHandlers                []func(*QQClient, *GroupMessageRecalledEvent)
+	friendRecalledHandlers               []func(*QQClient, *FriendMessageRecalledEvent)
+	joinGroupHandlers                    []func(*QQClient, *GroupInfo)
+	leaveGroupHandlers                   []func(*QQClient, *GroupLeaveEvent)
+	memberJoinedHandlers                 []func(*QQClient, *MemberJoinGroupEvent)
+	memberLeavedHandlers                 []func(*QQClient, *MemberLeaveGroupEvent)
+	memberCardUpdatedHandlers            []func(*QQClient, *MemberCardUpdatedEvent)
+	groupNameUpdatedHandlers             []func(*QQClient, *GroupNameUpdatedEvent)
+	permissionChangedHandlers            []func(*QQClient, *MemberPermissionChangedEvent)
+	groupInvitedHandlers                 []func(*QQClient, *GroupInvitedRequest)
+	joinRequestHandlers                  []func(*QQClient, *UserJoinGroupRequest)
+	friendRequestHandlers                []func(*QQClient, *NewFriendRequest)
+	newFriendHandlers                    []func(*QQClient, *NewFriendEvent)
+	disconnectHandlers                   []func(*QQClient, *ClientDisconnectedEvent)
+	logHandlers                          []func(*QQClient, *LogEvent)
+	serverUpdatedHandlers                []func(*QQClient, *ServerUpdatedEvent) bool
+	groupNotifyHandlers                  []func(*QQClient, INotifyEvent)
+	friendNotifyHandlers                 []func(*QQClient, INotifyEvent)
+	memberTitleUpdatedHandlers           []func(*QQClient, *MemberSpecialTitleUpdatedEvent)
+	offlineFileHandlers                  []func(*QQClient, *OfflineFileEvent)
+	otherClientStatusChangedHandlers     []func(*QQClient, *OtherClientStatusChangedEvent)
+	groupDigestHandlers                  []func(*QQClient, *GroupDigestEvent)
+	groupMessageReceiptHandlers          sync.Map
 }
 
 func (c *QQClient) OnPrivateMessage(f func(*QQClient, *message.PrivateMessage)) {
@@ -65,6 +73,34 @@ func (c *QQClient) OnSelfPrivateMessage(f func(*QQClient, *message.PrivateMessag
 
 func (c *QQClient) OnSelfGroupMessage(f func(*QQClient, *message.GroupMessage)) {
 	c.eventHandlers.selfGroupMessageHandlers = append(c.eventHandlers.selfGroupMessageHandlers, f)
+}
+
+func (s *GuildService) OnGuildChannelMessage(f func(*QQClient, *message.GuildChannelMessage)) {
+	s.c.eventHandlers.guildChannelMessageHandlers = append(s.c.eventHandlers.guildChannelMessageHandlers, f)
+}
+
+func (s *GuildService) OnGuildMessageReactionsUpdated(f func(*QQClient, *GuildMessageReactionsUpdatedEvent)) {
+	s.c.eventHandlers.guildMessageReactionsUpdatedHandlers = append(s.c.eventHandlers.guildMessageReactionsUpdatedHandlers, f)
+}
+
+func (s *GuildService) OnGuildMessageRecalled(f func(*QQClient, *GuildMessageRecalledEvent)) {
+	s.c.eventHandlers.guildMessageRecalledHandlers = append(s.c.eventHandlers.guildMessageRecalledHandlers, f)
+}
+
+func (s *GuildService) OnGuildChannelUpdated(f func(*QQClient, *GuildChannelUpdatedEvent)) {
+	s.c.eventHandlers.guildChannelUpdatedHandlers = append(s.c.eventHandlers.guildChannelUpdatedHandlers, f)
+}
+
+func (s *GuildService) OnGuildChannelCreated(f func(*QQClient, *GuildChannelOperationEvent)) {
+	s.c.eventHandlers.guildChannelCreatedHandlers = append(s.c.eventHandlers.guildChannelCreatedHandlers, f)
+}
+
+func (s *GuildService) OnGuildChannelDestroyed(f func(*QQClient, *GuildChannelOperationEvent)) {
+	s.c.eventHandlers.guildChannelDestroyedHandlers = append(s.c.eventHandlers.guildChannelDestroyedHandlers, f)
+}
+
+func (s *GuildService) OnMemberJoinedGuild(f func(*QQClient, *MemberJoinGuildEvent)) {
+	s.c.eventHandlers.memberJoinedGuildHandlers = append(s.c.eventHandlers.memberJoinedGuildHandlers, f)
 }
 
 func (c *QQClient) OnGroupMuted(f func(*QQClient, *GroupMuteEvent)) {
@@ -151,6 +187,10 @@ func (c *QQClient) OnFriendNotify(f func(*QQClient, INotifyEvent)) {
 	c.eventHandlers.friendNotifyHandlers = append(c.eventHandlers.friendNotifyHandlers, f)
 }
 
+func (c *QQClient) OnMemberSpecialTitleUpdated(f func(*QQClient, *MemberSpecialTitleUpdatedEvent)) {
+	c.eventHandlers.memberTitleUpdatedHandlers = append(c.eventHandlers.memberTitleUpdatedHandlers, f)
+}
+
 // OnGroupDigest 群精华消息事件注册
 func (c *QQClient) OnGroupDigest(f func(*QQClient, *GroupDigestEvent)) {
 	c.eventHandlers.groupDigestHandlers = append(c.eventHandlers.groupDigestHandlers, f)
@@ -221,6 +261,83 @@ func (c *QQClient) dispatchGroupMessageSelf(msg *message.GroupMessage) {
 	for _, f := range c.eventHandlers.selfGroupMessageHandlers {
 		cover(func() {
 			f(c, msg)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildChannelMessage(msg *message.GuildChannelMessage) {
+	if msg == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildChannelMessageHandlers {
+		cover(func() {
+			f(c, msg)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildMessageReactionsUpdatedEvent(e *GuildMessageReactionsUpdatedEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildMessageReactionsUpdatedHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildMessageRecalledEvent(e *GuildMessageRecalledEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildMessageRecalledHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildChannelUpdatedEvent(e *GuildChannelUpdatedEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildChannelUpdatedHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildChannelCreatedEvent(e *GuildChannelOperationEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildChannelCreatedHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchGuildChannelDestroyedEvent(e *GuildChannelOperationEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.guildChannelDestroyedHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchMemberJoinedGuildEvent(e *MemberJoinGuildEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.memberJoinedGuildHandlers {
+		cover(func() {
+			f(c, e)
 		})
 	}
 }
@@ -402,6 +519,17 @@ func (c *QQClient) dispatchFriendNotifyEvent(e INotifyEvent) {
 		return
 	}
 	for _, f := range c.eventHandlers.friendNotifyHandlers {
+		cover(func() {
+			f(c, e)
+		})
+	}
+}
+
+func (c *QQClient) dispatchMemberSpecialTitleUpdateEvent(e *MemberSpecialTitleUpdatedEvent) {
+	if e == nil {
+		return
+	}
+	for _, f := range c.eventHandlers.memberTitleUpdatedHandlers {
 		cover(func() {
 			f(c, e)
 		})

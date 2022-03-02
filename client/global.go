@@ -1,131 +1,34 @@
 package client
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/xml"
 	"fmt"
 	"math/rand"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/binary/jce"
-	devinfo "github.com/Mrs4s/MiraiGo/client/pb"
+	"github.com/Mrs4s/MiraiGo/client/internal/auth"
 	"github.com/Mrs4s/MiraiGo/client/pb/msg"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/utils"
-	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
 )
 
 type (
-	DeviceInfo struct {
-		Display      []byte
-		Product      []byte
-		Device       []byte
-		Board        []byte
-		Brand        []byte
-		Model        []byte
-		Bootloader   []byte
-		FingerPrint  []byte
-		BootId       []byte
-		ProcVersion  []byte
-		BaseBand     []byte
-		SimInfo      []byte
-		OSType       []byte
-		MacAddress   []byte
-		IpAddress    []byte
-		WifiBSSID    []byte
-		WifiSSID     []byte
-		IMSIMd5      []byte
-		IMEI         string
-		AndroidId    []byte
-		APN          []byte
-		VendorName   []byte
-		VendorOSName []byte
-		Guid         []byte
-		TgtgtKey     []byte
-		Protocol     ClientProtocol
-		Version      *Version
-	}
-
-	Version struct {
-		Incremental []byte
-		Release     []byte
-		CodeName    []byte
-		Sdk         uint32
-	}
-
-	DeviceInfoFile struct {
-		Display      string       `json:"display"`
-		Product      string       `json:"product"`
-		Device       string       `json:"device"`
-		Board        string       `json:"board"`
-		Model        string       `json:"model"`
-		FingerPrint  string       `json:"finger_print"`
-		BootId       string       `json:"boot_id"`
-		ProcVersion  string       `json:"proc_version"`
-		Protocol     int          `json:"protocol"` // 0: Pad 1: Phone 2: Watch
-		IMEI         string       `json:"imei"`
-		Brand        string       `json:"brand"`
-		Bootloader   string       `json:"bootloader"`
-		BaseBand     string       `json:"base_band"`
-		Version      *VersionFile `json:"version"`
-		SimInfo      string       `json:"sim_info"`
-		OsType       string       `json:"os_type"`
-		MacAddress   string       `json:"mac_address"`
-		IpAddress    []int32      `json:"ip_address"`
-		WifiBSSID    string       `json:"wifi_bssid"`
-		WifiSSID     string       `json:"wifi_ssid"`
-		ImsiMd5      string       `json:"imsi_md5"`
-		AndroidId    string       `json:"android_id"`
-		Apn          string       `json:"apn"`
-		VendorName   string       `json:"vendor_name"`
-		VendorOSName string       `json:"vendor_os_name"`
-	}
-
-	VersionFile struct {
-		Incremental string `json:"incremental"`
-		Release     string `json:"release"`
-		Codename    string `json:"codename"`
-		Sdk         uint32 `json:"sdk"`
-	}
-
-	groupMessageBuilder struct {
-		MessageSlices []*msg.Message
-	}
-
-	versionInfo struct {
-		ApkSign         []byte
-		ApkId           string
-		SortVersionName string
-		SdkVersion      string
-		AppId           uint32
-		SubAppId        uint32
-		BuildTime       uint32
-		SSOVersion      uint32
-		MiscBitmap      uint32
-		SubSigmap       uint32
-		MainSigMap      uint32
-		Protocol        ClientProtocol
-	}
-
-	incomingPacketInfo struct {
-		CommandName string
-		SequenceId  uint16
-		Params      requestParams
-	}
-
-	requestParams map[string]interface{}
+	DeviceInfo = auth.Device
+	Version    = auth.OSVersion
 )
 
-// default
 var SystemDeviceInfo = &DeviceInfo{
 	Display:      []byte("MIRAI.123456.001"),
 	Product:      []byte("mirai"),
@@ -137,7 +40,7 @@ var SystemDeviceInfo = &DeviceInfo{
 	FingerPrint:  []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/1234567:user/release-keys"),
 	BootId:       []byte("cb886ae2-00b6-4d68-a230-787f111d12c7"),
 	ProcVersion:  []byte("Linux version 3.0.31-cb886ae2 (android-build@xxx.xxx.xxx.xxx.com)"),
-	BaseBand:     []byte{},
+	BaseBand:     EmptyBytes,
 	SimInfo:      []byte("T-Mobile"),
 	OSType:       []byte("android"),
 	MacAddress:   []byte("00:50:56:C0:00:08"),
@@ -154,14 +57,11 @@ var SystemDeviceInfo = &DeviceInfo{
 		Incremental: []byte("5891938"),
 		Release:     []byte("10"),
 		CodeName:    []byte("REL"),
-		Sdk:         29,
+		SDK:         29,
 	},
 }
 
-var (
-	EmptyBytes  = []byte{}
-	NumberRange = "0123456789"
-)
+var EmptyBytes = make([]byte, 0)
 
 func init() {
 	r := make([]byte, 16)
@@ -175,8 +75,9 @@ func init() {
 func GenRandomDevice() {
 	r := make([]byte, 16)
 	rand.Read(r)
-	SystemDeviceInfo.Display = []byte("MIRAI." + utils.RandomStringRange(6, NumberRange) + ".001")
-	SystemDeviceInfo.FingerPrint = []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/" + utils.RandomStringRange(7, NumberRange) + ":user/release-keys")
+	const numberRange = "0123456789"
+	SystemDeviceInfo.Display = []byte("MIRAI." + utils.RandomStringRange(6, numberRange) + ".001")
+	SystemDeviceInfo.FingerPrint = []byte("mamoe/mirai/mirai:10/MIRAI.200122.001/" + utils.RandomStringRange(7, numberRange) + ":user/release-keys")
 	SystemDeviceInfo.BootId = binary.GenUUID(r)
 	SystemDeviceInfo.ProcVersion = []byte("Linux version 3.0.31-" + utils.RandomString(8) + " (android-build@xxx.xxx.xxx.xxx.com)")
 	rand.Read(r)
@@ -188,233 +89,6 @@ func GenRandomDevice() {
 	hex.Encode(SystemDeviceInfo.AndroidId, r)
 	SystemDeviceInfo.GenNewGuid()
 	SystemDeviceInfo.GenNewTgtgtKey()
-}
-
-func genVersionInfo(p ClientProtocol) *versionInfo {
-	switch p {
-	case AndroidPhone: // Dumped by mirai from qq android v8.2.7
-		return &versionInfo{
-			ApkId:           "com.tencent.mobileqq",
-			AppId:           537066738,
-			SubAppId:        537066738,
-			SortVersionName: "8.5.0",
-			BuildTime:       1607689988,
-			ApkSign:         []byte{0xA6, 0xB7, 0x45, 0xBF, 0x24, 0xA2, 0xC2, 0x77, 0x52, 0x77, 0x16, 0xF6, 0xF3, 0x6E, 0xB6, 0x8D},
-			SdkVersion:      "6.0.0.2454",
-			SSOVersion:      15,
-			MiscBitmap:      184024956,
-			SubSigmap:       0x10400,
-			MainSigMap:      34869472,
-			Protocol:        p,
-		}
-	case AndroidWatch:
-		return &versionInfo{
-			ApkId:           "com.tencent.qqlite",
-			AppId:           537064446,
-			SubAppId:        537064446,
-			SortVersionName: "2.0.5",
-			BuildTime:       1559564731,
-			ApkSign:         []byte{0xA6, 0xB7, 0x45, 0xBF, 0x24, 0xA2, 0xC2, 0x77, 0x52, 0x77, 0x16, 0xF6, 0xF3, 0x6E, 0xB6, 0x8D},
-			SdkVersion:      "6.0.0.236",
-			SSOVersion:      5,
-			MiscBitmap:      16252796,
-			SubSigmap:       0x10400,
-			MainSigMap:      34869472,
-			Protocol:        p,
-		}
-	case IPad:
-		return &versionInfo{
-			ApkId:           "com.tencent.minihd.qq",
-			AppId:           537065739,
-			SubAppId:        537065739,
-			SortVersionName: "5.8.9",
-			BuildTime:       1595836208,
-			ApkSign:         []byte{170, 57, 120, 244, 31, 217, 111, 249, 145, 74, 102, 158, 24, 100, 116, 199},
-			SdkVersion:      "6.0.0.2433",
-			SSOVersion:      12,
-			MiscBitmap:      150470524,
-			SubSigmap:       66560,
-			MainSigMap:      1970400,
-			Protocol:        p,
-		}
-	case MacOS:
-		return &versionInfo{
-			ApkId:           "com.tencent.minihd.qq",
-			AppId:           537064315,
-			SubAppId:        537064315,
-			SortVersionName: "5.8.9",
-			BuildTime:       1595836208,
-			ApkSign:         []byte{170, 57, 120, 244, 31, 217, 111, 249, 145, 74, 102, 158, 24, 100, 116, 199},
-			SdkVersion:      "6.0.0.2433",
-			SSOVersion:      12,
-			MiscBitmap:      150470524,
-			SubSigmap:       66560,
-			MainSigMap:      1970400,
-			Protocol:        p,
-		}
-	case QiDian:
-		return &versionInfo{
-			ApkId:           "com.tencent.qidian",
-			AppId:           537061386,
-			SubAppId:        537036590,
-			SortVersionName: "3.8.6",
-			BuildTime:       1556628836,
-			ApkSign:         []byte{160, 30, 236, 171, 133, 233, 227, 186, 43, 15, 106, 21, 140, 133, 92, 41},
-			SdkVersion:      "6.0.0.2365",
-			SSOVersion:      5,
-			MiscBitmap:      49807228,
-			SubSigmap:       66560,
-			MainSigMap:      34869472,
-			Protocol:        p,
-		}
-	}
-	return nil
-}
-
-func (info *DeviceInfo) ToJson() []byte {
-	f := &DeviceInfoFile{
-		Display:     string(info.Display),
-		Product:     string(info.Product),
-		Device:      string(info.Device),
-		Board:       string(info.Board),
-		Model:       string(info.Model),
-		FingerPrint: string(info.FingerPrint),
-		BootId:      string(info.BootId),
-		ProcVersion: string(info.ProcVersion),
-		IMEI:        info.IMEI,
-		Brand:       string(info.Brand),
-		Bootloader:  string(info.Bootloader),
-		BaseBand:    string(info.BaseBand),
-		AndroidId:   string(info.AndroidId),
-		Version: &VersionFile{
-			Incremental: string(info.Version.Incremental),
-			Release:     string(info.Version.Release),
-			Codename:    string(info.Version.CodeName),
-			Sdk:         info.Version.Sdk,
-		},
-		SimInfo:      string(info.SimInfo),
-		OsType:       string(info.OSType),
-		MacAddress:   string(info.MacAddress),
-		IpAddress:    []int32{int32(info.IpAddress[0]), int32(info.IpAddress[1]), int32(info.IpAddress[2]), int32(info.IpAddress[3])},
-		WifiBSSID:    string(info.WifiBSSID),
-		WifiSSID:     string(info.WifiSSID),
-		ImsiMd5:      hex.EncodeToString(info.IMSIMd5),
-		Apn:          string(info.APN),
-		VendorName:   string(info.VendorName),
-		VendorOSName: string(info.VendorOSName),
-		Protocol: func() int {
-			switch info.Protocol {
-			case IPad:
-				return 0
-			case AndroidPhone:
-				return 1
-			case AndroidWatch:
-				return 2
-			case MacOS:
-				return 3
-			case QiDian:
-				return 4
-			}
-			return 0
-		}(),
-	}
-	d, _ := json.Marshal(f)
-	return d
-}
-
-func (info *DeviceInfo) ReadJson(d []byte) error {
-	var f DeviceInfoFile
-	if err := json.Unmarshal(d, &f); err != nil {
-		return errors.Wrap(err, "failed to unmarshal json message")
-	}
-	SetIfNotEmpty := func(trg *[]byte, str string) {
-		if str != "" {
-			*trg = []byte(str)
-		}
-	}
-	SetIfNotEmpty(&info.Display, f.Display)
-	SetIfNotEmpty(&info.Product, f.Product)
-	SetIfNotEmpty(&info.Device, f.Device)
-	SetIfNotEmpty(&info.Board, f.Board)
-	SetIfNotEmpty(&info.Brand, f.Brand)
-	SetIfNotEmpty(&info.Model, f.Model)
-	SetIfNotEmpty(&info.Bootloader, f.Bootloader)
-	SetIfNotEmpty(&info.FingerPrint, f.FingerPrint)
-	SetIfNotEmpty(&info.BootId, f.BootId)
-	SetIfNotEmpty(&info.ProcVersion, f.ProcVersion)
-	SetIfNotEmpty(&info.BaseBand, f.BaseBand)
-	SetIfNotEmpty(&info.SimInfo, f.SimInfo)
-	SetIfNotEmpty(&info.OSType, f.OsType)
-	SetIfNotEmpty(&info.MacAddress, f.MacAddress)
-	if len(f.IpAddress) == 4 {
-		info.IpAddress = []byte{byte(f.IpAddress[0]), byte(f.IpAddress[1]), byte(f.IpAddress[2]), byte(f.IpAddress[3])}
-	}
-	SetIfNotEmpty(&info.WifiBSSID, f.WifiBSSID)
-	SetIfNotEmpty(&info.WifiSSID, f.WifiSSID)
-	if len(f.ImsiMd5) != 0 {
-		imsiMd5, err := hex.DecodeString(f.ImsiMd5)
-		if err != nil {
-			info.IMSIMd5 = imsiMd5
-		}
-	}
-	if f.IMEI != "" {
-		info.IMEI = f.IMEI
-	}
-	SetIfNotEmpty(&info.APN, f.Apn)
-	SetIfNotEmpty(&info.VendorName, f.VendorName)
-	SetIfNotEmpty(&info.VendorOSName, f.VendorOSName)
-
-	SetIfNotEmpty(&info.AndroidId, f.AndroidId)
-	if f.AndroidId == "" {
-		info.AndroidId = info.Display // ?
-	}
-
-	switch f.Protocol {
-	case 1:
-		info.Protocol = AndroidPhone
-	case 2:
-		info.Protocol = AndroidWatch
-	case 3:
-		info.Protocol = MacOS
-	case 4:
-		info.Protocol = QiDian
-	default:
-		info.Protocol = IPad
-	}
-	SystemDeviceInfo.GenNewGuid()
-	SystemDeviceInfo.GenNewTgtgtKey()
-	return nil
-}
-
-func (info *DeviceInfo) GenNewGuid() {
-	t := md5.Sum(append(info.AndroidId, info.MacAddress...))
-	info.Guid = t[:]
-}
-
-func (info *DeviceInfo) GenNewTgtgtKey() {
-	r := make([]byte, 16)
-	rand.Read(r)
-	t := md5.Sum(append(r, info.Guid...))
-	info.TgtgtKey = t[:]
-}
-
-func (info *DeviceInfo) GenDeviceInfoData() []byte {
-	m := &devinfo.DeviceInfo{
-		Bootloader:   string(info.Bootloader),
-		ProcVersion:  string(info.ProcVersion),
-		Codename:     string(info.Version.CodeName),
-		Incremental:  string(info.Version.Incremental),
-		Fingerprint:  string(info.FingerPrint),
-		BootId:       string(info.BootId),
-		AndroidId:    string(info.AndroidId),
-		BaseBand:     string(info.BaseBand),
-		InnerVersion: string(info.Version.Incremental),
-	}
-	data, err := proto.Marshal(m)
-	if err != nil {
-		panic(errors.Wrap(err, "failed to unmarshal protobuf message"))
-	}
-	return data
 }
 
 func GenIMEI() string {
@@ -441,7 +115,7 @@ func GenIMEI() string {
 }
 
 func getSSOAddress() ([]*net.TCPAddr, error) {
-	protocol := genVersionInfo(SystemDeviceInfo.Protocol)
+	protocol := SystemDeviceInfo.Protocol.Version()
 	key, _ := hex.DecodeString("F0441F5FF42DA58FDCF7949ABA62D411")
 	payload := jce.NewJceWriter(). // see ServerConfig.d
 					WriteInt64(0, 1).WriteInt64(0, 2).WriteByte(1, 3).
@@ -458,12 +132,15 @@ func getSSOAddress() ([]*net.TCPAddr, error) {
 		SFuncName:    "HttpServerListReq",
 		SBuffer:      buf.ToBytes(),
 	}
-	tea := binary.NewTeaCipher(key)
-	rsp, err := utils.HttpPostBytes("https://configsvr.msf.3g.qq.com/configsvr/serverlist.jsp", tea.Encrypt(binary.NewWriterF(func(w *binary.Writer) {
+	b, cl := binary.OpenWriterF(func(w *binary.Writer) {
 		w.WriteIntLvPacket(0, func(w *binary.Writer) {
 			w.Write(pkt.ToBytes())
 		})
-	})))
+	})
+	tea := binary.NewTeaCipher(key)
+	encpkt := tea.Encrypt(b)
+	cl()
+	rsp, err := utils.HttpPostBytes("https://configsvr.msf.3g.qq.com/configsvr/serverlist.jsp", encpkt)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to fetch server list")
 	}
@@ -472,8 +149,7 @@ func getSSOAddress() ([]*net.TCPAddr, error) {
 	rspPkt.ReadFrom(jce.NewJceReader(tea.Decrypt(rsp)[4:]))
 	data.ReadFrom(jce.NewJceReader(rspPkt.SBuffer))
 	reader := jce.NewJceReader(data.Map["HttpServerListRes"][1:])
-	servers := []jce.SsoServerInfo{}
-	reader.ReadSlice(&servers, 2)
+	servers := reader.ReadSsoServerInfos(2)
 	adds := make([]*net.TCPAddr, 0, len(servers))
 	for _, s := range servers {
 		if strings.Contains(s.Server, "com") {
@@ -487,16 +163,15 @@ func getSSOAddress() ([]*net.TCPAddr, error) {
 	return adds, nil
 }
 
-func qualityTest(addr *net.TCPAddr) (int64, error) {
+func qualityTest(addr string) (int64, error) {
 	// see QualityTestManager
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr.String(), time.Second*5)
+	conn, err := net.DialTimeout("tcp", addr, time.Second*5)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to connect to server during quality test")
 	}
 	_ = conn.Close()
-	end := time.Now()
-	return end.Sub(start).Milliseconds(), nil
+	return time.Since(start).Milliseconds(), nil
 }
 
 func (c *QQClient) parsePrivateMessage(msg *msg.Message) *message.PrivateMessage {
@@ -506,12 +181,12 @@ func (c *QQClient) parsePrivateMessage(msg *msg.Message) *message.PrivateMessage
 		sender = &message.Sender{
 			Uin:      msg.Head.GetFromUin(),
 			Nickname: msg.Head.GetFromNick(),
-			IsFriend: false,
 		}
 	} else {
 		sender = &message.Sender{
 			Uin:      friend.Uin,
 			Nickname: friend.Nickname,
+			IsFriend: true,
 		}
 	}
 	ret := &message.PrivateMessage{
@@ -568,33 +243,58 @@ func (c *QQClient) parseTempMessage(msg *msg.Message) *message.TempMessage {
 	}
 }
 
-func (b *groupMessageBuilder) build() *msg.Message {
-	sort.Slice(b.MessageSlices, func(i, j int) bool {
-		return b.MessageSlices[i].Content.GetPkgIndex() < b.MessageSlices[j].Content.GetPkgIndex()
+func (c *QQClient) messageBuilder(seq int32) *messageBuilder {
+	builder := &messageBuilder{}
+	actual, ok := c.msgBuilders.LoadOrStore(seq, builder)
+	if !ok {
+		time.AfterFunc(time.Minute, func() {
+			c.msgBuilders.Delete(seq) // delete avoid memory leak
+		})
+	}
+	return actual.(*messageBuilder)
+}
+
+type messageBuilder struct {
+	lock   sync.Mutex
+	slices []*msg.Message
+}
+
+func (b *messageBuilder) append(msg *msg.Message) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.slices = append(b.slices, msg)
+}
+
+func (b *messageBuilder) len() int32 {
+	b.lock.Lock()
+	x := len(b.slices)
+	b.lock.Unlock()
+	return int32(x)
+}
+
+func (b *messageBuilder) build() *msg.Message {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	sort.Slice(b.slices, func(i, j int) bool {
+		return b.slices[i].Content.GetPkgIndex() < b.slices[j].Content.GetPkgIndex()
 	})
-	base := b.MessageSlices[0]
-	for _, m := range b.MessageSlices[1:] {
+	base := b.slices[0]
+	for _, m := range b.slices[1:] {
 		base.Body.RichText.Elems = append(base.Body.RichText.Elems, m.Body.RichText.Elems...)
 	}
 	return base
 }
 
-func packUniRequestData(data []byte) (r []byte) {
-	r = append([]byte{0x0A}, data...)
+func packUniRequestData(data []byte) []byte {
+	r := make([]byte, 0, len(data)+2)
+	r = append(r, 0x0a)
+	r = append(r, data...)
 	r = append(r, 0x0B)
-	return
+	return r
 }
 
-func XmlEscape(c string) string {
-	buf := new(bytes.Buffer)
-	_ = xml.EscapeText(buf, []byte(c))
-	return buf.String()
-}
-
-func genForwardTemplate(resID, preview, title, brief, source, summary string, ts int64, items []*msg.PbMultiMsgItem) *message.ForwardElement {
-	template := fmt.Sprintf(`<?xml version='1.0' encoding='UTF-8'?><msg serviceID="35" templateID="1" action="viewMultiMsg" brief="%s" m_resid="%s" m_fileName="%d" tSum="3" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="0"><item layout="1"><title color="#000000" size="34">%s</title> %s<hr></hr><summary size="26" color="#808080">%s</summary></item><source name="%s"></source></msg>`,
-		brief, resID, ts, title, preview, summary, source,
-	)
+func genForwardTemplate(resID, preview, summary string, ts int64, items []*msg.PbMultiMsgItem) *message.ForwardElement {
+	template := forwardDisplay(resID, strconv.FormatInt(ts, 10), preview, summary)
 	for _, item := range items {
 		if item.GetFileName() == "MultiMsg" {
 			*item.FileName = strconv.FormatInt(ts, 10)
@@ -616,7 +316,7 @@ func genLongTemplate(resID, brief string, ts int64) *message.ServiceElement {
 		return brief
 	}()
 	template := fmt.Sprintf(`<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><msg serviceID="35" templateID="1" action="viewMultiMsg" brief="%s" m_resid="%s" m_fileName="%d" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="1"> <item layout="1"> <title>%s</title> <hr hidden="false" style="0"/> <summary>点击查看完整消息</summary> </item> <source name="聊天记录" icon="" action="" appid="-1"/> </msg>`,
-		XmlEscape(limited), resID, ts, XmlEscape(limited),
+		utils.XmlEscape(limited), resID, ts, utils.XmlEscape(limited),
 	)
 	return &message.ServiceElement{
 		Id:      35,
@@ -626,26 +326,14 @@ func genLongTemplate(resID, brief string, ts int64) *message.ServiceElement {
 	}
 }
 
-func (p requestParams) bool(k string) bool {
-	if p == nil {
-		return false
-	}
-	i, ok := p[k]
-	if !ok {
-		return false
-	}
-	return i.(bool)
-}
-
-func (p requestParams) int32(k string) int32 {
-	if p == nil {
-		return 0
-	}
-	i, ok := p[k]
-	if !ok {
-		return 0
-	}
-	return i.(int32)
+func (c *QQClient) getWebDeviceInfo() (i string) {
+	qimei := strings.ToLower(utils.RandomString(36))
+	i += fmt.Sprintf("i=%v&imsi=&mac=%v&m=%v&o=%v&", c.deviceInfo.IMEI, utils.B2S(c.deviceInfo.MacAddress), utils.B2S(c.deviceInfo.Device), utils.B2S(c.deviceInfo.Version.Release))
+	i += fmt.Sprintf("a=%v&sd=0&c64=0&sc=1&p=1080*2210&aid=%v&", c.deviceInfo.Version.SDK, c.deviceInfo.IMEI)
+	i += fmt.Sprintf("f=%v&mm=%v&cf=%v&cc=%v&", c.deviceInfo.Brand, 5629 /* Total Memory*/, 1725 /* CPU Frequency */, 8 /* CPU Core Count */)
+	i += fmt.Sprintf("qimei=%v&qimei36=%v&", qimei, qimei)
+	i += "sharpP=1&n=wifi&support_xsj_live=true&client_mod=default&timezone=Asia/Shanghai&material_sdk_version=2.9.0&vh265=null&refreshrate=60"
+	return
 }
 
 func (c *QQClient) packOIDBPackage(cmd, serviceType int32, body []byte) []byte {
@@ -659,9 +347,27 @@ func (c *QQClient) packOIDBPackage(cmd, serviceType int32, body []byte) []byte {
 	return r
 }
 
+func (c *QQClient) packOIDBPackageDynamically(cmd, serviceType int32, msg proto.DynamicMessage) []byte {
+	return c.packOIDBPackage(cmd, serviceType, msg.Encode())
+}
+
 func (c *QQClient) packOIDBPackageProto(cmd, serviceType int32, msg proto.Message) []byte {
 	b, _ := proto.Marshal(msg)
 	return c.packOIDBPackage(cmd, serviceType, b)
+}
+
+func unpackOIDBPackage(buff []byte, payload proto.Message) error {
+	pkg := new(oidb.OIDBSSOPkg)
+	if err := proto.Unmarshal(buff, pkg); err != nil {
+		return errors.Wrap(err, "failed to unmarshal protobuf message")
+	}
+	if pkg.Result != 0 {
+		return errors.Errorf("oidb result unsuccessful: %v msg: %v", pkg.Result, pkg.ErrorMsg)
+	}
+	if err := proto.Unmarshal(pkg.Bodybuffer, payload); err != nil {
+		return errors.Wrap(err, "failed to unmarshal protobuf message")
+	}
+	return nil
 }
 
 func (c *QQClient) Error(msg string, args ...interface{}) {
@@ -696,5 +402,13 @@ func (c *QQClient) Trace(msg string, args ...interface{}) {
 	c.dispatchLogEvent(&LogEvent{
 		Type:    "TRACE",
 		Message: fmt.Sprintf(msg, args...),
+	})
+}
+
+func (c *QQClient) Dump(msg string, data []byte, args ...interface{}) {
+	c.dispatchLogEvent(&LogEvent{
+		Type:    "DUMP",
+		Message: fmt.Sprintf(msg, args...),
+		Dump:    data,
 	})
 }

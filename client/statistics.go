@@ -1,20 +1,20 @@
 package client
 
-import "sync"
+import (
+	"go.uber.org/atomic"
+)
 
 type Statistics struct {
-	PacketReceived  uint64 `json:"packet_received"`
-	PacketSent      uint64 `json:"packet_sent"`
-	PacketLost      uint32 `json:"packet_lost"`
-	MessageReceived uint64 `json:"message_received"`
-	MessageSent     uint64 `json:"message_sent"`
-	DisconnectTimes uint32 `json:"disconnect_times"`
-	LostTimes       uint32 `json:"lost_times"`
-	LastMessageTime int64  `json:"last_message_time"`
-
-	once sync.Once
+	PacketReceived  atomic.Uint64 `json:"packet_received"`
+	PacketSent      atomic.Uint64 `json:"packet_sent"`
+	PacketLost      atomic.Uint64 `json:"packet_lost"`
+	MessageReceived atomic.Uint64 `json:"message_received"`
+	MessageSent     atomic.Uint64 `json:"message_sent"`
+	LastMessageTime atomic.Int64  `json:"last_message_time"`
+	DisconnectTimes atomic.Uint32 `json:"disconnect_times"`
+	LostTimes       atomic.Uint32 `json:"lost_times"`
 }
 
 func (c *QQClient) GetStatistics() *Statistics {
-	return c.stat
+	return &c.stat
 }

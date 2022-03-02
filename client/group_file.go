@@ -8,15 +8,14 @@ import (
 	"math/rand"
 	"os"
 	"runtime/debug"
-	"sync"
-
-	"google.golang.org/protobuf/proto"
 
 	"github.com/pkg/errors"
 
+	"github.com/Mrs4s/MiraiGo/client/internal/highway"
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
 	"github.com/Mrs4s/MiraiGo/client/pb/exciting"
 	"github.com/Mrs4s/MiraiGo/client/pb/oidb"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
 	"github.com/Mrs4s/MiraiGo/utils"
 )
 
@@ -56,7 +55,7 @@ type (
 	}
 )
 
-var fileSingleFlight = sync.Map{}
+var fsWaiter = utils.NewUploadWaiter()
 
 func init() {
 	decoders["OidbSvc.0x6d8_1"] = decodeOIDB6d81Response
@@ -164,15 +163,8 @@ func (fs *GroupFileSystem) GetFilesByFolder(folderID string) ([]*GroupFile, []*G
 
 func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 	// 同文件等待其他线程上传
-	if wg, ok := fileSingleFlight.Load(p); ok {
-		wg.(*sync.WaitGroup).Wait()
-	} else {
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		fileSingleFlight.Store(p, wg)
-		defer wg.Done()
-		defer fileSingleFlight.Delete(p)
-	}
+	fsWaiter.Wait(p)
+	defer fsWaiter.Done(p)
 
 	file, err := os.OpenFile(p, os.O_RDONLY, 0o666)
 	if err != nil {
@@ -190,9 +182,9 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 		return errors.Wrap(err, "query upload failed")
 	}
 	rsp := i.(*oidb.UploadFileRspBody)
-	if rsp.BoolFileExist {
-		_, pkt := fs.client.buildGroupFileFeedsRequest(fs.GroupCode, rsp.FileId, rsp.BusId, rand.Int31())
-		return fs.client.send(pkt)
+	if rsp.GetBoolFileExist() {
+		_, pkt := fs.client.buildGroupFileFeedsRequest(fs.GroupCode, rsp.GetFileId(), rsp.GetBusId(), rand.Int31())
+		return fs.client.sendPacket(pkt)
 	}
 	if len(rsp.UploadIpLanV4) == 0 {
 		return errors.New("server requires unsupported ftn upload")
@@ -202,7 +194,7 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 		Unknown2: proto.Int32(1),
 		Entry: &exciting.GroupFileUploadEntry{
 			BusiBuff: &exciting.ExcitingBusiInfo{
-				BusId:       &rsp.BusId,
+				BusId:       rsp.BusId,
 				SenderUin:   &fs.client.Uin,
 				ReceiverUin: &fs.GroupCode,
 				GroupCode:   &fs.GroupCode,
@@ -211,7 +203,7 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 				FileSize:  &size,
 				Md5:       md5Hash,
 				Sha1:      sha1Hash,
-				FileId:    []byte(rsp.FileId),
+				FileId:    []byte(rsp.GetFileId()),
 				UploadKey: rsp.CheckKey,
 			},
 			ClientInfo: &exciting.ExcitingClientInfo{
@@ -228,17 +220,24 @@ func (fs *GroupFileSystem) UploadFile(p, name, folderId string) error {
 						Unknown: proto.Int32(1),
 						Host:    &rsp.UploadIpLanV4[0],
 					},
-					Port: &rsp.UploadPort,
+					Port: rsp.UploadPort,
 				},
 			}},
 		},
 		Unknown3: proto.Int32(0),
 	})
-	if _, err = fs.client.excitingUploadStream(file, 71, fs.client.bigDataSession.SigSession, ext); err != nil {
+	client := fs.client
+	input := highway.ExcitingInput{
+		CommandID: 71,
+		Body:      file,
+		Ticket:    fs.client.highwaySession.SigSession,
+		Ext:       ext,
+	}
+	if _, err = fs.client.highwaySession.UploadExciting(input); err != nil {
 		return errors.Wrap(err, "upload failed")
 	}
-	_, pkt := fs.client.buildGroupFileFeedsRequest(fs.GroupCode, rsp.FileId, rsp.BusId, rand.Int31())
-	return fs.client.send(pkt)
+	_, pkt := client.buildGroupFileFeedsRequest(fs.GroupCode, rsp.GetFileId(), rsp.GetBusId(), rand.Int31())
+	return client.sendPacket(pkt)
 }
 
 func (fs *GroupFileSystem) GetDownloadUrl(file *GroupFile) string {
@@ -277,19 +276,18 @@ func (fs *GroupFileSystem) DeleteFile(parentFolderID, fileId string, busId int32
 }
 
 func (c *QQClient) buildGroupFileUploadReqPacket(parentFolderID, fileName string, groupCode, fileSize int64, md5, sha1 []byte) (uint16, []byte) {
-	seq := c.nextSeq()
 	b, _ := proto.Marshal(&oidb.D6D6ReqBody{UploadFileReq: &oidb.UploadFileReqBody{
-		GroupCode:          groupCode,
-		AppId:              3,
-		BusId:              102,
-		Entrance:           5,
-		ParentFolderId:     parentFolderID,
-		FileName:           fileName,
-		LocalPath:          "/storage/emulated/0/Pictures/files/s/" + fileName,
-		Int64FileSize:      fileSize,
+		GroupCode:          &groupCode,
+		AppId:              proto.Int32(3),
+		BusId:              proto.Int32(102),
+		Entrance:           proto.Int32(5),
+		ParentFolderId:     &parentFolderID,
+		FileName:           &fileName,
+		LocalPath:          proto.String("/storage/emulated/0/Pictures/files/s/" + fileName),
+		Int64FileSize:      &fileSize,
 		Sha:                sha1,
 		Md5:                md5,
-		SupportMultiUpload: true,
+		SupportMultiUpload: proto.Bool(true),
 	}})
 	req := &oidb.OIDBSSOPkg{
 		Command:       1750,
@@ -298,12 +296,10 @@ func (c *QQClient) buildGroupFileUploadReqPacket(parentFolderID, fileName string
 		ClientVersion: "android 8.4.8",
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d6_0", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d6_0", payload)
 }
 
 func (c *QQClient) buildGroupFileFeedsRequest(groupCode int64, fileID string, busId, msgRand int32) (uint16, []byte) {
-	seq := c.nextSeq()
 	req := c.packOIDBPackageProto(1753, 4, &oidb.D6D9ReqBody{FeedsInfoReq: &oidb.FeedsReqBody{
 		GroupCode: proto.Uint64(uint64(groupCode)),
 		AppId:     proto.Uint32(3),
@@ -314,13 +310,11 @@ func (c *QQClient) buildGroupFileFeedsRequest(groupCode int64, fileID string, bu
 			MsgRandom: proto.Uint32(uint32(msgRand)),
 		}},
 	}})
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d9_4", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, req)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d9_4", req)
 }
 
 // OidbSvc.0x6d8_1
 func (c *QQClient) buildGroupFileListRequestPacket(groupCode int64, folderID string, startIndex uint32) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D6D8ReqBody{FileListInfoReq: &oidb.GetFileListReqBody{
 		GroupCode:    proto.Uint64(uint64(groupCode)),
 		AppId:        proto.Uint32(3),
@@ -342,12 +336,10 @@ func (c *QQClient) buildGroupFileListRequestPacket(groupCode int64, folderID str
 		ClientVersion: "android 8.4.8",
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d8_1", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d8_1", payload)
 }
 
 func (c *QQClient) buildGroupFileCountRequestPacket(groupCode int64) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D6D8ReqBody{GroupFileCountReq: &oidb.GetFileCountReqBody{
 		GroupCode: proto.Uint64(uint64(groupCode)),
 		AppId:     proto.Uint32(3),
@@ -361,12 +353,10 @@ func (c *QQClient) buildGroupFileCountRequestPacket(groupCode int64) (uint16, []
 		ClientVersion: "android 8.4.8",
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d8_1", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d8_1", payload)
 }
 
 func (c *QQClient) buildGroupFileSpaceRequestPacket(groupCode int64) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D6D8ReqBody{GroupSpaceReq: &oidb.GetSpaceReqBody{
 		GroupCode: proto.Uint64(uint64(groupCode)),
 		AppId:     proto.Uint32(3),
@@ -379,54 +369,46 @@ func (c *QQClient) buildGroupFileSpaceRequestPacket(groupCode int64) (uint16, []
 		ClientVersion: "android 8.4.8",
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d8_1", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d8_1", payload)
 }
 
 func (c *QQClient) buildGroupFileCreateFolderPacket(groupCode int64, parentFolder, name string) (uint16, []byte) {
-	seq := c.nextSeq()
 	payload := c.packOIDBPackageProto(1751, 0, &oidb.D6D7ReqBody{CreateFolderReq: &oidb.CreateFolderReqBody{
 		GroupCode:      proto.Uint64(uint64(groupCode)),
 		AppId:          proto.Uint32(3),
 		ParentFolderId: &parentFolder,
 		FolderName:     &name,
 	}})
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d7_0", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d7_0", payload)
 }
 
 func (c *QQClient) buildGroupFileRenameFolderPacket(groupCode int64, folderId, newName string) (uint16, []byte) {
-	seq := c.nextSeq()
 	payload := c.packOIDBPackageProto(1751, 2, &oidb.D6D7ReqBody{RenameFolderReq: &oidb.RenameFolderReqBody{
 		GroupCode:     proto.Uint64(uint64(groupCode)),
 		AppId:         proto.Uint32(3),
 		FolderId:      proto.String(folderId),
 		NewFolderName: proto.String(newName),
 	}})
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d7_2", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d7_2", payload)
 }
 
 func (c *QQClient) buildGroupFileDeleteFolderPacket(groupCode int64, folderId string) (uint16, []byte) {
-	seq := c.nextSeq()
 	payload := c.packOIDBPackageProto(1751, 1, &oidb.D6D7ReqBody{DeleteFolderReq: &oidb.DeleteFolderReqBody{
 		GroupCode: proto.Uint64(uint64(groupCode)),
 		AppId:     proto.Uint32(3),
 		FolderId:  proto.String(folderId),
 	}})
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d7_1", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d7_1", payload)
 }
 
 // OidbSvc.0x6d6_2
 func (c *QQClient) buildGroupFileDownloadReqPacket(groupCode int64, fileId string, busId int32) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D6D6ReqBody{
 		DownloadFileReq: &oidb.DownloadFileReqBody{
-			GroupCode: groupCode,
-			AppId:     3,
-			BusId:     busId,
-			FileId:    fileId,
+			GroupCode: &groupCode,
+			AppId:     proto.Int32(3),
+			BusId:     &busId,
+			FileId:    &fileId,
 		},
 	}
 	b, _ := proto.Marshal(body)
@@ -436,18 +418,16 @@ func (c *QQClient) buildGroupFileDownloadReqPacket(groupCode int64, fileId strin
 		Bodybuffer:  b,
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d6_2", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d6_2", payload)
 }
 
 func (c *QQClient) buildGroupFileDeleteReqPacket(groupCode int64, parentFolderId, fileId string, busId int32) (uint16, []byte) {
-	seq := c.nextSeq()
 	body := &oidb.D6D6ReqBody{DeleteFileReq: &oidb.DeleteFileReqBody{
-		GroupCode:      groupCode,
-		AppId:          3,
-		BusId:          busId,
-		ParentFolderId: parentFolderId,
-		FileId:         fileId,
+		GroupCode:      &groupCode,
+		AppId:          proto.Int32(3),
+		BusId:          &busId,
+		ParentFolderId: &parentFolderId,
+		FileId:         &fileId,
 	}}
 	b, _ := proto.Marshal(body)
 	req := &oidb.OIDBSSOPkg{
@@ -457,11 +437,10 @@ func (c *QQClient) buildGroupFileDeleteReqPacket(groupCode int64, parentFolderId
 		ClientVersion: "android 8.4.8",
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "OidbSvc.0x6d6_3", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("OidbSvc.0x6d6_3", payload)
 }
 
-func decodeOIDB6d81Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOIDB6d81Response(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D6D8RspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -474,7 +453,7 @@ func decodeOIDB6d81Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) 
 }
 
 // OidbSvc.0x6d6_2
-func decodeOIDB6d62Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOIDB6d62Response(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D6D6RspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -484,14 +463,14 @@ func decodeOIDB6d62Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) 
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
 	if rsp.DownloadFileRsp.DownloadUrl == nil {
-		return nil, errors.New(rsp.DownloadFileRsp.ClientWording)
+		return nil, errors.New(rsp.DownloadFileRsp.GetClientWording())
 	}
-	ip := rsp.DownloadFileRsp.DownloadIp
+	ip := rsp.DownloadFileRsp.GetDownloadIp()
 	url := hex.EncodeToString(rsp.DownloadFileRsp.DownloadUrl)
 	return fmt.Sprintf("http://%s/ftn_handler/%s/", ip, url), nil
 }
 
-func decodeOIDB6d63Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOIDB6d63Response(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D6D6RspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -503,10 +482,10 @@ func decodeOIDB6d63Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) 
 	if rsp.DeleteFileRsp == nil {
 		return "", nil
 	}
-	return rsp.DeleteFileRsp.ClientWording, nil
+	return rsp.DeleteFileRsp.GetClientWording(), nil
 }
 
-func decodeOIDB6d60Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOIDB6d60Response(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D6D6RspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {
@@ -518,7 +497,7 @@ func decodeOIDB6d60Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) 
 	return rsp.UploadFileRsp, nil
 }
 
-func decodeOIDB6d7Response(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeOIDB6d7Response(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	pkg := oidb.OIDBSSOPkg{}
 	rsp := oidb.D6D7RspBody{}
 	if err := proto.Unmarshal(payload, &pkg); err != nil {

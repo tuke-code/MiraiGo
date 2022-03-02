@@ -1,11 +1,12 @@
 package client
 
 import (
-	"github.com/Mrs4s/MiraiGo/client/pb/msg"
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/Mrs4s/MiraiGo/protocol/packets"
 	"github.com/pkg/errors"
-	"google.golang.org/protobuf/proto"
+
+	"github.com/Mrs4s/MiraiGo/client/internal/network"
+	"github.com/Mrs4s/MiraiGo/client/pb/msg"
+	"github.com/Mrs4s/MiraiGo/internal/proto"
+	"github.com/Mrs4s/MiraiGo/message"
 )
 
 // 撤回相关处理逻辑
@@ -44,7 +45,6 @@ func (c *QQClient) RecallPrivateMessage(uin, ts int64, msgID, msgInternalId int3
 
 // PbMessageSvc.PbMsgWithDraw
 func (c *QQClient) buildGroupRecallPacket(groupCode int64, msgSeq, msgRan int32) (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &msg.MsgWithDrawReq{
 		GroupWithDraw: []*msg.GroupMsgWithDrawReq{
 			{
@@ -62,12 +62,10 @@ func (c *QQClient) buildGroupRecallPacket(groupCode int64, msgSeq, msgRan int32)
 		},
 	}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "PbMessageSvc.PbMsgWithDraw", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("PbMessageSvc.PbMsgWithDraw", payload)
 }
 
 func (c *QQClient) buildPrivateRecallPacket(uin, ts int64, msgSeq, random int32) (uint16, []byte) {
-	seq := c.nextSeq()
 	req := &msg.MsgWithDrawReq{C2CWithDraw: []*msg.C2CMsgWithDrawReq{
 		{
 			MsgInfo: []*msg.C2CMsgInfo{
@@ -75,21 +73,26 @@ func (c *QQClient) buildPrivateRecallPacket(uin, ts int64, msgSeq, random int32)
 					FromUin:   &c.Uin,
 					ToUin:     &uin,
 					MsgTime:   &ts,
-					MsgUid:    proto.Int64(int64(random)),
+					MsgUid:    proto.Int64(0x0100_0000_0000_0000 | (int64(random) & 0xFFFFFFFF)),
 					MsgSeq:    &msgSeq,
 					MsgRandom: &random,
+					RoutingHead: &msg.RoutingHead{
+						C2C: &msg.C2C{
+							ToUin: &uin,
+						},
+					},
 				},
 			},
-			Reserved: []byte{0x08, 0x00},
-			SubCmd:   proto.Int32(1),
+			LongMessageFlag: proto.Int32(0),
+			Reserved:        []byte{0x08, 0x00},
+			SubCmd:          proto.Int32(1),
 		},
 	}}
 	payload, _ := proto.Marshal(req)
-	packet := packets.BuildUniPacket(c.Uin, seq, "PbMessageSvc.PbMsgWithDraw", 1, c.OutGoingPacketSessionId, EmptyBytes, c.sigInfo.d2Key, payload)
-	return seq, packet
+	return c.uniPacket("PbMessageSvc.PbMsgWithDraw", payload)
 }
 
-func decodeMsgWithDrawResponse(_ *QQClient, _ *incomingPacketInfo, payload []byte) (interface{}, error) {
+func decodeMsgWithDrawResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (interface{}, error) {
 	rsp := msg.MsgWithDrawResp{}
 	if err := proto.Unmarshal(payload, &rsp); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
