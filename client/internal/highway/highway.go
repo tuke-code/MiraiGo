@@ -47,15 +47,7 @@ func (s *Session) AppendAddr(ip, port uint32) {
 	s.SsoAddr = append(s.SsoAddr, addr)
 }
 
-type Input struct {
-	CommandID int32
-	Key       []byte
-	Body      io.ReadSeeker
-}
-
-func (s *Session) Upload(addr Addr, input Input) error {
-	fh, length := utils.ComputeMd5AndLength(input.Body)
-	_, _ = input.Body.Seek(0, io.SeekStart)
+func (s *Session) Upload(addr Addr, trans Transaction) error {
 	conn, err := net.DialTimeout("tcp", addr.String(), time.Second*3)
 	if err != nil {
 		return errors.Wrap(err, "connect error")
@@ -66,11 +58,9 @@ func (s *Session) Upload(addr Addr, input Input) error {
 	chunk := make([]byte, chunkSize)
 	offset := 0
 	reader := binary.NewNetworkReader(conn)
-	w := binary.SelectWriter()
-	defer binary.PutWriter(w)
 	for {
 		chunk = chunk[:chunkSize]
-		rl, err := io.ReadFull(input.Body, chunk)
+		rl, err := io.ReadFull(trans.Body, chunk)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -79,14 +69,14 @@ func (s *Session) Upload(addr Addr, input Input) error {
 		}
 		ch := md5.Sum(chunk)
 		head, _ := proto.Marshal(&pb.ReqDataHighwayHead{
-			MsgBasehead: s.dataHighwayHead(_REQ_CMD_DATA, 4096, input.CommandID, 2052),
+			MsgBasehead: s.dataHighwayHead(_REQ_CMD_DATA, 4096, trans.CommandID, 2052),
 			MsgSeghead: &pb.SegHead{
-				Filesize:      length,
+				Filesize:      trans.Size,
 				Dataoffset:    int64(offset),
 				Datalength:    int32(rl),
-				Serviceticket: input.Key,
+				Serviceticket: trans.Ticket,
 				Md5:           ch[:],
-				FileMd5:       fh,
+				FileMd5:       trans.Sum,
 			},
 			ReqExtendinfo: []byte{},
 		})
