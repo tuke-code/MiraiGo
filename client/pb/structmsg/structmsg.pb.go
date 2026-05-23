@@ -6,6 +6,7 @@ package structmsg
 type AddFrdSNInfo struct {
 	NotSeeDynamic int32 `protobuf:"varint,1,opt"`
 	SetSn         int32 `protobuf:"varint,2,opt"`
+	_             [0]func()
 }
 
 type FlagInfo struct {
@@ -26,11 +27,13 @@ type FlagInfo struct {
 	GrpMsgMaskInviteAutoJoin          int32 `protobuf:"varint,15,opt"`
 	GrpMsgGetDisbandedByAdmin         int32 `protobuf:"varint,16,opt"`
 	GrpMsgGetC2CInviteJoinGroup       int32 `protobuf:"varint,17,opt"`
+	_                                 [0]func()
 }
 
 type FriendInfo struct {
 	MsgJointFriend string `protobuf:"bytes,1,opt"`
 	MsgBlacklist   string `protobuf:"bytes,2,opt"`
+	_              [0]func()
 }
 
 type SGroupInfo struct {
@@ -40,17 +43,20 @@ type SGroupInfo struct {
 	MsgDetailAlert    string `protobuf:"bytes,4,opt"`
 	MsgOtherAdminDone string `protobuf:"bytes,5,opt"`
 	AppPrivilegeFlag  int32  `protobuf:"varint,6,opt"`
+	_                 [0]func()
 }
 
 type MsgInviteExt struct {
 	SrcType   int32 `protobuf:"varint,1,opt"`
 	SrcCode   int64 `protobuf:"varint,2,opt"`
 	WaitState int32 `protobuf:"varint,3,opt"`
+	_         [0]func()
 }
 
 type MsgPayGroupExt struct {
 	JoinGrpTime int64 `protobuf:"varint,1,opt"`
 	QuitGrpTime int64 `protobuf:"varint,2,opt"`
+	_           [0]func()
 }
 
 type ReqNextSystemMsg struct {
@@ -62,6 +68,7 @@ type ReqNextSystemMsg struct {
 	Language           int32     `protobuf:"varint,6,opt"`
 	Version            int32     `protobuf:"varint,7,opt"`
 	FriendMsgTypeFlag  int64     `protobuf:"varint,8,opt"`
+	_                  [0]func()
 }
 
 type ReqSystemMsg struct {
@@ -70,6 +77,7 @@ type ReqSystemMsg struct {
 	LatestGroupSeq  int64 `protobuf:"varint,3,opt"`
 	Version         int32 `protobuf:"varint,4,opt"`
 	Language        int32 `protobuf:"varint,5,opt"`
+	_               [0]func()
 }
 
 type ReqSystemMsgAction struct {
@@ -82,6 +90,7 @@ type ReqSystemMsgAction struct {
 	GroupMsgType int32                `protobuf:"varint,7,opt"`
 	ActionInfo   *SystemMsgActionInfo `protobuf:"bytes,8,opt"`
 	Language     int32                `protobuf:"varint,9,opt"`
+	_            [0]func()
 }
 
 type ReqSystemMsgNew struct {
@@ -96,6 +105,7 @@ type ReqSystemMsgNew struct {
 	IsGetGrpRibbon    bool      `protobuf:"varint,9,opt"`
 	FriendMsgTypeFlag int64     `protobuf:"varint,10,opt"`
 	ReqMsgType        int32     `protobuf:"varint,11,opt"`
+	_                 [0]func()
 }
 
 type ReqSystemMsgRead struct {
@@ -103,11 +113,13 @@ type ReqSystemMsgRead struct {
 	LatestGroupSeq  int64 `protobuf:"varint,2,opt"`
 	Type            int32 `protobuf:"varint,3,opt"`
 	Checktype       int32 `protobuf:"varint,4,opt"`
+	_               [0]func()
 }
 
 type RspHead struct {
 	Result  int32  `protobuf:"varint,1,opt"`
 	MsgFail string `protobuf:"bytes,2,opt"`
+	_       [0]func()
 }
 
 type RspNextSystemMsg struct {
@@ -138,6 +150,7 @@ type RspSystemMsgAction struct {
 	Type              int32    `protobuf:"varint,3,opt"`
 	MsgInvalidDecided string   `protobuf:"bytes,5,opt"`
 	RemarkResult      int32    `protobuf:"varint,6,opt"`
+	_                 [0]func()
 }
 
 type RspSystemMsgNew struct {
@@ -165,6 +178,7 @@ type RspSystemMsgRead struct {
 	Head      *RspHead `protobuf:"bytes,1,opt"`
 	Type      int32    `protobuf:"varint,2,opt"`
 	Checktype int32    `protobuf:"varint,3,opt"`
+	_         [0]func()
 }
 
 type StructMsg struct {
@@ -175,61 +189,62 @@ type StructMsg struct {
 	ReqUin     int64      `protobuf:"varint,5,opt"`
 	UnreadFlag int32      `protobuf:"varint,6,opt"`
 	Msg        *SystemMsg `protobuf:"bytes,50,opt"`
+	_          [0]func()
 }
 
 type SystemMsg struct {
-	SubType                int32              `protobuf:"varint,1,opt"`
-	MsgTitle               string             `protobuf:"bytes,2,opt"`
-	MsgDescribe            string             `protobuf:"bytes,3,opt"`
-	MsgAdditional          string             `protobuf:"bytes,4,opt"`
-	MsgSource              string             `protobuf:"bytes,5,opt"`
-	MsgDecided             string             `protobuf:"bytes,6,opt"`
-	SrcId                  int32              `protobuf:"varint,7,opt"`
-	SubSrcId               int32              `protobuf:"varint,8,opt"`
-	Actions                []*SystemMsgAction `protobuf:"bytes,9,rep"`
-	GroupCode              int64              `protobuf:"varint,10,opt"`
-	ActionUin              int64              `protobuf:"varint,11,opt"`
-	GroupMsgType           int32              `protobuf:"varint,12,opt"`
-	GroupInviterRole       int32              `protobuf:"varint,13,opt"`
-	FriendInfo             *FriendInfo        `protobuf:"bytes,14,opt"`
-	GroupInfo              *SGroupInfo        `protobuf:"bytes,15,opt"`
-	ActorUin               int64              `protobuf:"varint,16,opt"`
-	MsgActorDescribe       string             `protobuf:"bytes,17,opt"`
-	MsgAdditionalList      string             `protobuf:"bytes,18,opt"`
-	Relation               int32              `protobuf:"varint,19,opt"`
-	Reqsubtype             int32              `protobuf:"varint,20,opt"`
-	CloneUin               int64              `protobuf:"varint,21,opt"`
-	DiscussUin             int64              `protobuf:"varint,22,opt"`
-	EimGroupId             int64              `protobuf:"varint,23,opt"`
-	MsgInviteExtinfo       *MsgInviteExt      `protobuf:"bytes,24,opt"`
-	MsgPayGroupExtinfo     *MsgPayGroupExt    `protobuf:"bytes,25,opt"`
-	SourceFlag             int32              `protobuf:"varint,26,opt"`
-	GameNick               []byte             `protobuf:"bytes,27,opt"`
-	GameMsg                []byte             `protobuf:"bytes,28,opt"`
-	GroupFlagext3          int32              `protobuf:"varint,29,opt"`
-	GroupOwnerUin          int64              `protobuf:"varint,30,opt"`
-	DoubtFlag              int32              `protobuf:"varint,31,opt"`
-	WarningTips            []byte             `protobuf:"bytes,32,opt"`
-	NameMore               []byte             `protobuf:"bytes,33,opt"`
-	ReqUinFaceid           int32              `protobuf:"varint,50,opt"`
-	ReqUinNick             string             `protobuf:"bytes,51,opt"`
-	GroupName              string             `protobuf:"bytes,52,opt"`
-	ActionUinNick          string             `protobuf:"bytes,53,opt"`
-	MsgQna                 string             `protobuf:"bytes,54,opt"`
-	MsgDetail              string             `protobuf:"bytes,55,opt"`
-	GroupExtFlag           int32              `protobuf:"varint,57,opt"`
-	ActorUinNick           string             `protobuf:"bytes,58,opt"`
-	PicUrl                 string             `protobuf:"bytes,59,opt"`
-	CloneUinNick           string             `protobuf:"bytes,60,opt"`
-	ReqUinBusinessCard     string             `protobuf:"bytes,61,opt"`
-	EimGroupIdName         string             `protobuf:"bytes,63,opt"`
-	ReqUinPreRemark        string             `protobuf:"bytes,64,opt"`
-	ActionUinQqNick        string             `protobuf:"bytes,65,opt"`
-	ActionUinRemark        string             `protobuf:"bytes,66,opt"`
-	ReqUinGender           int32              `protobuf:"varint,67,opt"`
-	ReqUinAge              int32              `protobuf:"varint,68,opt"`
-	C2CInviteJoinGroupFlag int32              `protobuf:"varint,69,opt"`
-	CardSwitch             int32              `protobuf:"varint,101,opt"`
+	SubType       int32  `protobuf:"varint,1,opt"`
+	MsgTitle      string `protobuf:"bytes,2,opt"`
+	MsgDescribe   string `protobuf:"bytes,3,opt"`
+	MsgAdditional string `protobuf:"bytes,4,opt"`
+	MsgSource     string `protobuf:"bytes,5,opt"`
+	MsgDecided    string `protobuf:"bytes,6,opt"`
+	SrcId         int32  `protobuf:"varint,7,opt"`
+	SubSrcId      int32  `protobuf:"varint,8,opt"`
+	// repeated SystemMsgAction actions = 9;
+	GroupCode        int64 `protobuf:"varint,10,opt"`
+	ActionUin        int64 `protobuf:"varint,11,opt"`
+	GroupMsgType     int32 `protobuf:"varint,12,opt"`
+	GroupInviterRole int32 `protobuf:"varint,13,opt"`
+	// FriendInfo friendInfo = 14;
+	// SGroupInfo groupInfo = 15;
+	ActorUin          int64  `protobuf:"varint,16,opt"`
+	MsgActorDescribe  string `protobuf:"bytes,17,opt"`
+	MsgAdditionalList string `protobuf:"bytes,18,opt"`
+	Relation          int32  `protobuf:"varint,19,opt"`
+	Reqsubtype        int32  `protobuf:"varint,20,opt"`
+	CloneUin          int64  `protobuf:"varint,21,opt"`
+	DiscussUin        int64  `protobuf:"varint,22,opt"`
+	EimGroupId        int64  `protobuf:"varint,23,opt"`
+	// MsgInviteExt msgInviteExtinfo = 24;
+	// MsgPayGroupExt msgPayGroupExtinfo = 25;
+	SourceFlag             int32  `protobuf:"varint,26,opt"`
+	GameNick               []byte `protobuf:"bytes,27,opt"`
+	GameMsg                []byte `protobuf:"bytes,28,opt"`
+	GroupFlagext3          int32  `protobuf:"varint,29,opt"`
+	GroupOwnerUin          int64  `protobuf:"varint,30,opt"`
+	DoubtFlag              int32  `protobuf:"varint,31,opt"`
+	WarningTips            []byte `protobuf:"bytes,32,opt"`
+	NameMore               []byte `protobuf:"bytes,33,opt"`
+	ReqUinFaceid           int32  `protobuf:"varint,50,opt"`
+	ReqUinNick             string `protobuf:"bytes,51,opt"`
+	GroupName              string `protobuf:"bytes,52,opt"`
+	ActionUinNick          string `protobuf:"bytes,53,opt"`
+	MsgQna                 string `protobuf:"bytes,54,opt"`
+	MsgDetail              string `protobuf:"bytes,55,opt"`
+	GroupExtFlag           int32  `protobuf:"varint,57,opt"`
+	ActorUinNick           string `protobuf:"bytes,58,opt"`
+	PicUrl                 string `protobuf:"bytes,59,opt"`
+	CloneUinNick           string `protobuf:"bytes,60,opt"`
+	ReqUinBusinessCard     string `protobuf:"bytes,61,opt"`
+	EimGroupIdName         string `protobuf:"bytes,63,opt"`
+	ReqUinPreRemark        string `protobuf:"bytes,64,opt"`
+	ActionUinQqNick        string `protobuf:"bytes,65,opt"`
+	ActionUinRemark        string `protobuf:"bytes,66,opt"`
+	ReqUinGender           int32  `protobuf:"varint,67,opt"`
+	ReqUinAge              int32  `protobuf:"varint,68,opt"`
+	C2CInviteJoinGroupFlag int32  `protobuf:"varint,69,opt"`
+	CardSwitch             int32  `protobuf:"varint,101,opt"`
 }
 
 type SystemMsgAction struct {
@@ -238,6 +253,7 @@ type SystemMsgAction struct {
 	Action     int32                `protobuf:"varint,3,opt"`
 	ActionInfo *SystemMsgActionInfo `protobuf:"bytes,4,opt"`
 	DetailName string               `protobuf:"bytes,5,opt"`
+	_          [0]func()
 }
 
 type SystemMsgActionInfo struct {

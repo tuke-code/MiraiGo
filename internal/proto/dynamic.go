@@ -1,23 +1,44 @@
 package proto
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math"
+	"sort"
 )
 
 type DynamicMessage map[uint64]any
 
+// zigzag encoding types
+type (
+	SInt   int
+	SInt32 int32
+	SInt64 int64
+)
+
 type encoder struct {
-	bytes.Buffer
+	buf []byte
 }
 
 func (msg DynamicMessage) Encode() []byte {
-	en := &encoder{}
+	en := encoder{}
+
+	// sort all items
+	type pair struct {
+		key   uint64
+		value any
+	}
+	all := make([]pair, len(msg))
+	for k, v := range msg {
+		all = append(all, pair{key: k, value: v})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].key < all[j].key
+	})
+
 	//nolint:staticcheck
-	for id, value := range msg {
-		key := id << 3
-		switch v := value.(type) {
+	for _, item := range all {
+		key := item.key << 3
+		switch v := item.value.(type) {
 		case bool:
 			en.uvarint(key | 0)
 			vi := uint64(0)
@@ -27,19 +48,31 @@ func (msg DynamicMessage) Encode() []byte {
 			en.uvarint(vi)
 		case int:
 			en.uvarint(key | 0)
-			en.svarint(int64(v))
+			en.uvarint(uint64(v))
+		case uint:
+			en.uvarint(key | 0)
+			en.uvarint(uint64(v))
 		case int32:
 			en.uvarint(key | 0)
-			en.svarint(int64(v))
+			en.uvarint(uint64(v))
 		case int64:
 			en.uvarint(key | 0)
-			en.svarint(v)
+			en.uvarint(uint64(v))
 		case uint32:
 			en.uvarint(key | 0)
 			en.uvarint(uint64(v))
 		case uint64:
 			en.uvarint(key | 0)
 			en.uvarint(v)
+		case SInt:
+			en.uvarint(key | 0)
+			en.svarint(int64(v))
+		case SInt32:
+			en.uvarint(key | 0)
+			en.svarint(int64(v))
+		case SInt64:
+			en.uvarint(key | 0)
+			en.svarint(int64(v))
 		case float32:
 			en.uvarint(key | 5)
 			en.u32(math.Float32bits(v))
@@ -48,9 +81,8 @@ func (msg DynamicMessage) Encode() []byte {
 			en.u64(math.Float64bits(v))
 		case string:
 			en.uvarint(key | 2)
-			b := []byte(v)
-			en.uvarint(uint64(len(b)))
-			_, _ = en.Write(b)
+			en.uvarint(uint64(len(v)))
+			en.buf = append(en.buf, v...)
 		case []uint64:
 			for i := 0; i < len(v); i++ {
 				en.uvarint(key | 0)
@@ -59,35 +91,29 @@ func (msg DynamicMessage) Encode() []byte {
 		case []byte:
 			en.uvarint(key | 2)
 			en.uvarint(uint64(len(v)))
-			_, _ = en.Write(v)
+			en.buf = append(en.buf, v...)
 		case DynamicMessage:
 			en.uvarint(key | 2)
 			b := v.Encode()
 			en.uvarint(uint64(len(b)))
-			_, _ = en.Write(b)
+			en.buf = append(en.buf, b...)
 		}
 	}
-	return en.Bytes()
+	return en.buf
 }
 
 func (en *encoder) uvarint(v uint64) {
-	var b [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(b[:], v)
-	_, _ = en.Write(b[:n])
+	en.buf = binary.AppendUvarint(en.buf, v)
 }
 
 func (en *encoder) svarint(v int64) {
-	en.uvarint(uint64(v)<<1 ^ uint64(v>>63))
+	en.buf = binary.AppendVarint(en.buf, v)
 }
 
 func (en *encoder) u32(v uint32) {
-	var b [4]byte
-	binary.LittleEndian.PutUint32(b[:], v)
-	_, _ = en.Write(b[:])
+	en.buf = binary.LittleEndian.AppendUint32(en.buf, v)
 }
 
 func (en *encoder) u64(v uint64) {
-	var b [8]byte
-	binary.LittleEndian.PutUint64(b[:], v)
-	_, _ = en.Write(b[:])
+	en.buf = binary.LittleEndian.AppendUint64(en.buf, v)
 }

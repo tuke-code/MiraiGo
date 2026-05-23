@@ -6,6 +6,7 @@ package cmd0x346
 type ApplyCleanTrafficRsp struct {
 	RetCode int32  `protobuf:"varint,10,opt"`
 	RetMsg  string `protobuf:"bytes,20,opt"`
+	_       [0]func()
 }
 
 type ApplyCopyFromReq struct {
@@ -44,6 +45,7 @@ type ApplyCopyToRsp struct {
 	RetCode int32  `protobuf:"varint,10,opt"`
 	RetMsg  string `protobuf:"bytes,20,opt"`
 	FileKey string `protobuf:"bytes,30,opt"`
+	_       [0]func()
 }
 
 type ApplyDownloadAbsReq struct {
@@ -55,6 +57,7 @@ type ApplyDownloadAbsRsp struct {
 	RetCode      int32         `protobuf:"varint,10,opt"`
 	RetMsg       string        `protobuf:"bytes,20,opt"`
 	DownloadInfo *DownloadInfo `protobuf:"bytes,30,opt"`
+	_            [0]func()
 }
 
 type ApplyDownloadReq struct {
@@ -69,6 +72,7 @@ type ApplyDownloadRsp struct {
 	RetMsg       string        `protobuf:"bytes,20,opt"`
 	DownloadInfo *DownloadInfo `protobuf:"bytes,30,opt"`
 	FileInfo     *FileInfo     `protobuf:"bytes,40,opt"`
+	_            [0]func()
 }
 
 type ApplyForwardFileReq struct {
@@ -88,6 +92,7 @@ type ApplyForwardFileRsp struct {
 }
 
 type ApplyGetTrafficReq struct {
+	_ [0]func()
 }
 
 type ApplyGetTrafficRsp struct {
@@ -97,12 +102,14 @@ type ApplyGetTrafficRsp struct {
 	UseFileNum  int32  `protobuf:"varint,40,opt"`
 	AllFileSize int64  `protobuf:"varint,50,opt"`
 	AllFileNum  int32  `protobuf:"varint,60,opt"`
+	_           [0]func()
 }
 
 type ApplyListDownloadReq struct {
 	Uin        int64 `protobuf:"varint,10,opt"`
 	BeginIndex int32 `protobuf:"varint,20,opt"`
 	ReqCount   int32 `protobuf:"varint,30,opt"`
+	_          [0]func()
 }
 
 type ApplyListDownloadRsp struct {
@@ -221,6 +228,8 @@ type ApplyUploadReqV3 struct {
 	LocalFilepath string `protobuf:"bytes,70,opt"`
 	DangerLevel   int32  `protobuf:"varint,80,opt"`
 	TotalSpace    int64  `protobuf:"varint,90,opt"`
+	Md5           []byte `protobuf:"bytes,110,opt"`
+	X3Sha         []byte `protobuf:"bytes,120,opt"`
 }
 
 type ApplyUploadRsp struct {
@@ -258,23 +267,24 @@ type ApplyUploadRspV2 struct {
 }
 
 type ApplyUploadRspV3 struct {
-	RetCode           int32    `protobuf:"varint,10,opt"`
-	RetMsg            string   `protobuf:"bytes,20,opt"`
-	TotalSpace        int64    `protobuf:"varint,30,opt"`
-	UsedSpace         int64    `protobuf:"varint,40,opt"`
-	UploadedSize      int64    `protobuf:"varint,50,opt"`
-	UploadIp          string   `protobuf:"bytes,60,opt"`
-	UploadDomain      string   `protobuf:"bytes,70,opt"`
-	UploadPort        int32    `protobuf:"varint,80,opt"`
-	Uuid              []byte   `protobuf:"bytes,90,opt"`
-	UploadKey         []byte   `protobuf:"bytes,100,opt"`
-	BoolFileExist     bool     `protobuf:"varint,110,opt"`
-	PackSize          int32    `protobuf:"varint,120,opt"`
-	UploadIpList      []string `protobuf:"bytes,130,rep"`
-	UploadHttpsPort   int32    `protobuf:"varint,140,opt"`
-	UploadHttpsDomain string   `protobuf:"bytes,150,opt"`
-	UploadDns         string   `protobuf:"bytes,160,opt"`
-	UploadLanip       string   `protobuf:"bytes,170,opt"`
+	RetCode                 int32    `protobuf:"varint,10,opt"`
+	RetMsg                  string   `protobuf:"bytes,20,opt"`
+	TotalSpace              int64    `protobuf:"varint,30,opt"`
+	UsedSpace               int64    `protobuf:"varint,40,opt"`
+	UploadedSize            int64    `protobuf:"varint,50,opt"`
+	UploadIp                string   `protobuf:"bytes,60,opt"`
+	UploadDomain            string   `protobuf:"bytes,70,opt"`
+	UploadPort              int32    `protobuf:"varint,80,opt"`
+	Uuid                    []byte   `protobuf:"bytes,90,opt"`
+	UploadKey               []byte   `protobuf:"bytes,100,opt"`
+	BoolFileExist           bool     `protobuf:"varint,110,opt"`
+	PackSize                int32    `protobuf:"varint,120,opt"`
+	UploadIpList            []string `protobuf:"bytes,130,rep"`
+	UploadHttpsPort         int32    `protobuf:"varint,140,opt"`
+	UploadHttpsDomain       string   `protobuf:"bytes,150,opt"`
+	UploadDns               string   `protobuf:"bytes,160,opt"`
+	UploadLanip             string   `protobuf:"bytes,170,opt"`
+	MediaPlateformUploadKey []byte   `protobuf:"bytes,220,opt"`
 }
 
 type DelMessageReq struct {
@@ -283,6 +293,7 @@ type DelMessageReq struct {
 	Time        int32 `protobuf:"varint,10,opt"`
 	Random      int32 `protobuf:"varint,20,opt"`
 	SeqNo       int32 `protobuf:"varint,30,opt"`
+	_           [0]func()
 }
 
 type DeleteFileReq struct {
@@ -295,6 +306,7 @@ type DeleteFileReq struct {
 type DeleteFileRsp struct {
 	RetCode int32  `protobuf:"varint,10,opt"`
 	RetMsg  string `protobuf:"bytes,20,opt"`
+	_       [0]func()
 }
 
 type DownloadInfo struct {
@@ -316,6 +328,7 @@ type DownloadSuccRsp struct {
 	RetCode  int32  `protobuf:"varint,10,opt"`
 	RetMsg   string `protobuf:"bytes,20,opt"`
 	DownStat int32  `protobuf:"varint,30,opt"`
+	_        [0]func()
 }
 
 type ExtensionReq struct {
@@ -336,6 +349,7 @@ type ExtensionReq struct {
 }
 
 type ExtensionRsp struct {
+	_ [0]func()
 }
 
 type FileInfo struct {
@@ -364,6 +378,7 @@ type FileQueryRsp struct {
 	RetCode  int32     `protobuf:"varint,10,opt"`
 	RetMsg   string    `protobuf:"bytes,20,opt"`
 	FileInfo *FileInfo `protobuf:"bytes,30,opt"`
+	_        [0]func()
 }
 
 type RecallFileReq struct {
@@ -374,12 +389,14 @@ type RecallFileReq struct {
 type RecallFileRsp struct {
 	RetCode int32  `protobuf:"varint,1,opt"`
 	RetMsg  string `protobuf:"bytes,2,opt"`
+	_       [0]func()
 }
 
 type RecvListQueryReq struct {
 	Uin        int64 `protobuf:"varint,1,opt"`
 	BeginIndex int32 `protobuf:"varint,2,opt"`
 	ReqCount   int32 `protobuf:"varint,3,opt"`
+	_          [0]func()
 }
 
 type RecvListQueryRsp struct {
@@ -401,72 +418,73 @@ type RenewFileReq struct {
 type RenewFileRsp struct {
 	RetCode int32  `protobuf:"varint,1,opt"`
 	RetMsg  string `protobuf:"bytes,2,opt"`
+	_       [0]func()
 }
 
 type C346ReqBody struct {
-	Cmd                  int32                 `protobuf:"varint,1,opt"`
-	Seq                  int32                 `protobuf:"varint,2,opt"`
-	RecvListQueryReq     *RecvListQueryReq     `protobuf:"bytes,3,opt"`
-	SendListQueryReq     *SendListQueryReq     `protobuf:"bytes,4,opt"`
-	RenewFileReq         *RenewFileReq         `protobuf:"bytes,5,opt"`
-	RecallFileReq        *RecallFileReq        `protobuf:"bytes,6,opt"`
-	ApplyUploadReq       *ApplyUploadReq       `protobuf:"bytes,7,opt"`
-	ApplyUploadHitReq    *ApplyUploadHitReq    `protobuf:"bytes,8,opt"`
-	ApplyForwardFileReq  *ApplyForwardFileReq  `protobuf:"bytes,9,opt"`
-	UploadSuccReq        *UploadSuccReq        `protobuf:"bytes,10,opt"`
-	DeleteFileReq        *DeleteFileReq        `protobuf:"bytes,11,opt"`
-	DownloadSuccReq      *DownloadSuccReq      `protobuf:"bytes,12,opt"`
-	ApplyDownloadAbsReq  *ApplyDownloadAbsReq  `protobuf:"bytes,13,opt"`
-	ApplyDownloadReq     *ApplyDownloadReq     `protobuf:"bytes,14,opt"`
-	ApplyListDownloadReq *ApplyListDownloadReq `protobuf:"bytes,15,opt"`
-	FileQueryReq         *FileQueryReq         `protobuf:"bytes,16,opt"`
-	ApplyCopyFromReq     *ApplyCopyFromReq     `protobuf:"bytes,17,opt"`
-	ApplyUploadReqV2     *ApplyUploadReqV2     `protobuf:"bytes,18,opt"`
-	ApplyUploadReqV3     *ApplyUploadReqV3     `protobuf:"bytes,19,opt"`
-	ApplyUploadHitReqV2  *ApplyUploadHitReqV2  `protobuf:"bytes,20,opt"`
-	ApplyUploadHitReqV3  *ApplyUploadHitReqV3  `protobuf:"bytes,21,opt"`
-	BusinessId           int32                 `protobuf:"varint,101,opt"`
-	ClientType           int32                 `protobuf:"varint,102,opt"`
-	ApplyCopyToReq       *ApplyCopyToReq       `protobuf:"bytes,90000,opt"`
-	//ApplyCleanTrafficReq applyCleanTrafficReq = 90001; empty message
-	ApplyGetTrafficReq *ApplyGetTrafficReq `protobuf:"bytes,90002,opt"`
-	ExtensionReq       *ExtensionReq       `protobuf:"bytes,99999,opt"`
+	Cmd int32 `protobuf:"varint,1,opt"`
+	Seq int32 `protobuf:"varint,2,opt"`
+	// RecvListQueryReq recvListQueryReq = 3;
+	// SendListQueryReq sendListQueryReq = 4;
+	// RenewFileReq renewFileReq = 5;
+	// RecallFileReq recallFileReq = 6;
+	ApplyUploadReq *ApplyUploadReq `protobuf:"bytes,7,opt"`
+	// ApplyUploadHitReq applyUploadHitReq = 8;
+	// ApplyForwardFileReq applyForwardFileReq = 9;
+	UploadSuccReq *UploadSuccReq `protobuf:"bytes,10,opt"`
+	// DeleteFileReq deleteFileReq = 11;
+	// DownloadSuccReq downloadSuccReq = 12;
+	// ApplyDownloadAbsReq applyDownloadAbsReq = 13;
+	ApplyDownloadReq *ApplyDownloadReq `protobuf:"bytes,14,opt"`
+	// ApplyListDownloadReq applyListDownloadReq = 15;
+	// FileQueryReq fileQueryReq = 16;
+	// ApplyCopyFromReq applyCopyFromReq = 17;
+	// ApplyUploadReqV2 applyUploadReqV2 = 18;
+	ApplyUploadReqV3 *ApplyUploadReqV3 `protobuf:"bytes,19,opt"`
+	// ApplyUploadHitReqV2 applyUploadHitReqV2 = 20;
+	// ApplyUploadHitReqV3 applyUploadHitReqV3 = 21;
+	BusinessId               int32  `protobuf:"varint,101,opt"`
+	ClientType               int32  `protobuf:"varint,102,opt"`
+	FlagSupportMediaplatform uint32 `protobuf:"varint,200,opt"`
+	// ApplyCopyToReq applyCopyToReq = 90000;
+	// ApplyCleanTrafficReq applyCleanTrafficReq = 90001; empty message
+	// ApplyGetTrafficReq applyGetTrafficReq = 90002;
+	ExtensionReq *ExtensionReq `protobuf:"bytes,99999,opt"`
+	_            [0]func()
 }
 
 type C346RspBody struct {
-	Cmd                  int32                 `protobuf:"varint,1,opt"`
-	Seq                  int32                 `protobuf:"varint,2,opt"`
-	RecvListQueryRsp     *RecvListQueryRsp     `protobuf:"bytes,3,opt"`
-	SendListQueryRsp     *SendListQueryRsp     `protobuf:"bytes,4,opt"`
-	RenewFileRsp         *RenewFileRsp         `protobuf:"bytes,5,opt"`
-	RecallFileRsp        *RecallFileRsp        `protobuf:"bytes,6,opt"`
-	ApplyUploadRsp       *ApplyUploadRsp       `protobuf:"bytes,7,opt"`
-	ApplyUploadHitRsp    *ApplyUploadHitRsp    `protobuf:"bytes,8,opt"`
-	ApplyForwardFileRsp  *ApplyForwardFileRsp  `protobuf:"bytes,9,opt"`
-	UploadSuccRsp        *UploadSuccRsp        `protobuf:"bytes,10,opt"`
-	DeleteFileRsp        *DeleteFileRsp        `protobuf:"bytes,11,opt"`
-	DownloadSuccRsp      *DownloadSuccRsp      `protobuf:"bytes,12,opt"`
-	ApplyDownloadAbsRsp  *ApplyDownloadAbsRsp  `protobuf:"bytes,13,opt"`
-	ApplyDownloadRsp     *ApplyDownloadRsp     `protobuf:"bytes,14,opt"`
-	ApplyListDownloadRsp *ApplyListDownloadRsp `protobuf:"bytes,15,opt"`
-	FileQueryRsp         *FileQueryRsp         `protobuf:"bytes,16,opt"`
-	ApplyCopyFromRsp     *ApplyCopyFromRsp     `protobuf:"bytes,17,opt"`
-	ApplyUploadRspV2     *ApplyUploadRspV2     `protobuf:"bytes,18,opt"`
-	ApplyUploadRspV3     *ApplyUploadRspV3     `protobuf:"bytes,19,opt"`
-	ApplyUploadHitRspV2  *ApplyUploadHitRspV2  `protobuf:"bytes,20,opt"`
-	ApplyUploadHitRspV3  *ApplyUploadHitRspV3  `protobuf:"bytes,21,opt"`
-	BusinessId           int32                 `protobuf:"varint,101,opt"`
-	ClientType           int32                 `protobuf:"varint,102,opt"`
-	ApplyCopyToRsp       *ApplyCopyToRsp       `protobuf:"bytes,90000,opt"`
-	ApplyCleanTrafficRsp *ApplyCleanTrafficRsp `protobuf:"bytes,90001,opt"`
-	ApplyGetTrafficRsp   *ApplyGetTrafficRsp   `protobuf:"bytes,90002,opt"`
-	ExtensionRsp         *ExtensionRsp         `protobuf:"bytes,99999,opt"`
+	Cmd int32 `protobuf:"varint,1,opt"`
+	Seq int32 `protobuf:"varint,2,opt"`
+	// RecvListQueryRsp recvListQueryRsp = 3;
+	// SendListQueryRsp sendListQueryRsp = 4;
+	// RenewFileRsp renewFileRsp = 5;
+	// RecallFileRsp recallFileRsp = 6;
+	ApplyUploadRsp *ApplyUploadRsp `protobuf:"bytes,7,opt"`
+	// ApplyUploadHitRsp applyUploadHitRsp = 8;
+	// ApplyForwardFileRsp applyForwardFileRsp = 9;
+	// UploadSuccRsp uploadSuccRsp = 10;
+	// DeleteFileRsp deleteFileRsp = 11;
+	// DownloadSuccRsp downloadSuccRsp = 12;
+	// ApplyDownloadAbsRsp applyDownloadAbsRsp = 13;
+	ApplyDownloadRsp *ApplyDownloadRsp `protobuf:"bytes,14,opt"`
+	// ApplyListDownloadRsp applyListDownloadRsp = 15;
+	// FileQueryRsp fileQueryRsp = 16;
+	// ApplyCopyFromRsp applyCopyFromRsp = 17;
+	// ApplyUploadRspV2 applyUploadRspV2 = 18;
+	ApplyUploadRspV3 *ApplyUploadRspV3 `protobuf:"bytes,19,opt"`
+	// ApplyUploadHitRspV2 applyUploadHitRspV2 = 20;
+	// ApplyUploadHitRspV3 applyUploadHitRspV3 = 21;
+	BusinessId int32 `protobuf:"varint,101,opt"`
+	ClientType int32 `protobuf:"varint,102,opt"`
+	_          [0]func()
 }
 
 type SendListQueryReq struct {
 	Uin        int64 `protobuf:"varint,1,opt"`
 	BeginIndex int32 `protobuf:"varint,2,opt"`
 	ReqCount   int32 `protobuf:"varint,3,opt"`
+	_          [0]func()
 }
 
 type SendListQueryRsp struct {
@@ -491,4 +509,5 @@ type UploadSuccRsp struct {
 	RetCode  int32     `protobuf:"varint,10,opt"`
 	RetMsg   string    `protobuf:"bytes,20,opt"`
 	FileInfo *FileInfo `protobuf:"bytes,30,opt"`
+	_        [0]func()
 }

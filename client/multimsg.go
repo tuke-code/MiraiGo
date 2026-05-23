@@ -51,9 +51,9 @@ func (c *QQClient) buildMultiApplyUpPacket(data, hash []byte, buType int32, grou
 }
 
 // MultiMsg.ApplyUp
-func decodeMultiApplyUpResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (any, error) {
+func decodeMultiApplyUpResponse(_ *QQClient, pkt *network.Packet) (any, error) {
 	body := multimsg.MultiRspBody{}
-	if err := proto.Unmarshal(payload, &body); err != nil {
+	if err := proto.Unmarshal(pkt.Payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
 	if len(body.MultimsgApplyupRsp) == 0 {
@@ -91,21 +91,29 @@ func (c *QQClient) buildMultiApplyDownPacket(resID string) (uint16, []byte) {
 }
 
 // MultiMsg.ApplyDown
-func decodeMultiApplyDownResponse(_ *QQClient, _ *network.IncomingPacketInfo, payload []byte) (any, error) {
+func decodeMultiApplyDownResponse(_ *QQClient, pkt *network.Packet) (any, error) {
 	body := multimsg.MultiRspBody{}
-	if err := proto.Unmarshal(payload, &body); err != nil {
+	if err := proto.Unmarshal(pkt.Payload, &body); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal protobuf message")
 	}
 	if len(body.MultimsgApplydownRsp) == 0 {
-		return nil, errors.New("not found")
+		return nil, errors.New("message not found")
 	}
 	rsp := body.MultimsgApplydownRsp[0]
+
+	if rsp.ThumbDownPara == nil {
+		return nil, errors.New("message not found")
+	}
 
 	var prefix string
 	if rsp.MsgExternInfo != nil && rsp.MsgExternInfo.ChannelType == 2 {
 		prefix = "https://ssl.htdata.qq.com"
 	} else {
-		prefix = fmt.Sprintf("http://%s:%d", binary.UInt32ToIPV4Address(uint32(rsp.Uint32DownIp[0])), body.MultimsgApplydownRsp[0].Uint32DownPort[0])
+		ma := body.MultimsgApplydownRsp[0]
+		if len(rsp.Uint32DownIp) == 0 || len(ma.Uint32DownPort) == 0 {
+			return nil, errors.New("message not found")
+		}
+		prefix = fmt.Sprintf("http://%s:%d", binary.UInt32ToIPV4Address(uint32(rsp.Uint32DownIp[0])), ma.Uint32DownPort[0])
 	}
 	b, err := utils.HttpGetBytes(fmt.Sprintf("%s%s", prefix, string(rsp.ThumbDownPara)), "")
 	if err != nil {
@@ -149,9 +157,9 @@ func (l *forwardMsgLinker) link(name string) *message.ForwardMessage {
 	}
 	nodes := make([]*message.ForwardNode, 0, len(item.Buffer.Msg))
 	for _, m := range item.Buffer.Msg {
-		name := m.Head.GetFromNick()
-		if m.Head.GetMsgType() == 82 && m.Head.GroupInfo != nil {
-			name = m.Head.GroupInfo.GetGroupCard()
+		name := m.Head.FromNick.Unwrap()
+		if m.Head.MsgType.Unwrap() == 82 && m.Head.GroupInfo != nil {
+			name = m.Head.GroupInfo.GroupCard.Unwrap()
 		}
 
 		msgElems := message.ParseMessageElems(m.Body.RichText.Elems)
@@ -163,10 +171,15 @@ func (l *forwardMsgLinker) link(name string) *message.ForwardMessage {
 			}
 		}
 
+		gid := int64(0) // 给群号一个缺省值0，防止在读合并转发的私聊内容时候会报错
+		if m.Head.GroupInfo != nil {
+			gid = m.Head.GroupInfo.GroupCode.Unwrap()
+		}
 		nodes = append(nodes, &message.ForwardNode{
-			SenderId:   m.Head.GetFromUin(),
+			GroupId:    gid,
+			SenderId:   m.Head.FromUin.Unwrap(),
 			SenderName: name,
-			Time:       m.Head.GetMsgTime(),
+			Time:       m.Head.MsgTime.Unwrap(),
 			Message:    msgElems,
 		})
 	}
@@ -182,9 +195,9 @@ func (c *QQClient) GetForwardMessage(resID string) *message.ForwardMessage {
 		items: make(map[string]*msg.PbMultiMsgItem),
 	}
 	for _, item := range m.Items {
-		linker.items[item.GetFileName()] = item
+		linker.items[item.FileName.Unwrap()] = item
 	}
-	return linker.link(m.FileName)
+	return linker.link("MultiMsg")
 }
 
 func (c *QQClient) DownloadForwardMessage(resId string) *message.ForwardElement {
@@ -199,9 +212,9 @@ func (c *QQClient) DownloadForwardMessage(resId string) *message.ForwardElement 
 	var pv bytes.Buffer
 	for i := 0; i < int(math.Min(4, float64(len(multiMsg.Msg)))); i++ {
 		m := multiMsg.Msg[i]
-		sender := m.Head.GetFromNick()
-		if m.Head.GetMsgType() == 82 && m.Head.GroupInfo != nil {
-			sender = m.Head.GroupInfo.GetGroupCard()
+		sender := m.Head.FromNick.Unwrap()
+		if m.Head.MsgType.Unwrap() == 82 && m.Head.GroupInfo != nil {
+			sender = m.Head.GroupInfo.GroupCard.Unwrap()
 		}
 		brief := message.ToReadableString(message.ParseMessageElems(multiMsg.Msg[i].Body.RichText.Elems))
 		fmt.Fprintf(&pv, `<title size="26" color="#777777">%s: %s</title>`, sender, brief)
@@ -291,26 +304,22 @@ func (builder *ForwardMessageBuilder) Main(m *message.ForwardMessage) *message.F
 	if err != nil {
 		return nil
 	}
-	content := forwardDisplay(rsp.MsgResid, filename, m.Preview(), fmt.Sprintf("查看 %d 条转发消息", m.Length()))
-	for i, ip := range rsp.Uint32UpIp {
-		addr := highway.Addr{IP: uint32(ip), Port: int(rsp.Uint32UpPort[i])}
-		hash := md5.Sum(body)
-		input := highway.Transaction{
-			CommandID: 27,
-			Ticket:    rsp.MsgSig,
-			Body:      bytes.NewReader(body),
-			Sum:       hash[:],
-			Size:      int64(len(body)),
-		}
-		err := c.highwaySession.Upload(addr, input)
-		if err != nil {
-			continue
-		}
-		return &message.ForwardElement{
-			FileName: filename,
-			Content:  content,
-			ResId:    rsp.MsgResid,
-		}
+	content := forwardDisplay(rsp.MsgResid, utils.RandomString(32), m.Preview(), fmt.Sprintf("查看 %d 条转发消息", m.Length()))
+	bodyHash := md5.Sum(body)
+	input := highway.Transaction{
+		CommandID: 27,
+		Ticket:    rsp.MsgSig,
+		Body:      bytes.NewReader(body),
+		Sum:       bodyHash[:],
+		Size:      int64(len(body)),
 	}
-	return nil
+	_, err = c.highwaySession.Upload(input)
+	if err != nil {
+		return nil
+	}
+	return &message.ForwardElement{
+		FileName: filename,
+		Content:  content,
+		ResId:    rsp.MsgResid,
+	}
 }

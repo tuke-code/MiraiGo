@@ -3,6 +3,25 @@
 
 package pb
 
+type SSOReserveField struct {
+	Flag        int32          `protobuf:"varint,9,opt"`
+	Qimei       string         `protobuf:"bytes,12,opt"`
+	NewconnFlag int32          `protobuf:"varint,14,opt"`
+	Uid         string         `protobuf:"bytes,16,opt"`
+	Imsi        int32          `protobuf:"varint,18,opt"`
+	NetworkType int32          `protobuf:"varint,19,opt"`
+	IpStackType int32          `protobuf:"varint,20,opt"`
+	MessageType int32          `protobuf:"varint,21,opt"`
+	SecInfo     *SsoSecureInfo `protobuf:"bytes,24,opt"`
+	SsoIpOrigin int32          `protobuf:"varint,28,opt"`
+}
+
+type SsoSecureInfo struct {
+	SecSig         []byte `protobuf:"bytes,1,opt"`
+	SecDeviceToken []byte `protobuf:"bytes,2,opt"`
+	SecExtra       []byte `protobuf:"bytes,3,opt"`
+}
+
 type DeviceInfo struct {
 	Bootloader   string `protobuf:"bytes,1,opt"`
 	ProcVersion  string `protobuf:"bytes,2,opt"`
@@ -13,6 +32,7 @@ type DeviceInfo struct {
 	AndroidId    string `protobuf:"bytes,7,opt"`
 	BaseBand     string `protobuf:"bytes,8,opt"`
 	InnerVersion string `protobuf:"bytes,9,opt"`
+	_            [0]func()
 }
 
 type RequestBody struct {
@@ -22,6 +42,7 @@ type RequestBody struct {
 type ConfigSeq struct {
 	Type    int32 `protobuf:"varint,1,opt"`
 	Version int32 `protobuf:"varint,2,opt"`
+	_       [0]func()
 }
 
 type D50ReqBody struct {
@@ -69,6 +90,7 @@ type DataHighwayHead struct {
 	CommandId  int32  `protobuf:"varint,8,opt"`
 	BuildVer   string `protobuf:"bytes,9,opt"`
 	LocaleId   int32  `protobuf:"varint,10,opt"`
+	_          [0]func()
 }
 
 type SegHead struct {
@@ -101,6 +123,7 @@ type MessageItem struct {
 
 type SubD4 struct {
 	Uin int64 `protobuf:"varint,1,opt"`
+	_   [0]func()
 }
 
 type Sub8A struct {
@@ -121,21 +144,25 @@ type Sub8AMsgInfo struct {
 	PkgNum    int32 `protobuf:"varint,7,opt"`
 	PkgIndex  int32 `protobuf:"varint,8,opt"`
 	DevSeq    int32 `protobuf:"varint,9,opt"`
+	_         [0]func()
 }
 
 type SubB3 struct {
 	Type            int32              `protobuf:"varint,1,opt"`
 	MsgAddFrdNotify *SubB3AddFrdNotify `protobuf:"bytes,2,opt"`
+	_               [0]func()
 }
 
 type SubB3AddFrdNotify struct {
 	Uin  int64  `protobuf:"varint,1,opt"`
 	Nick string `protobuf:"bytes,5,opt"`
+	_    [0]func()
 }
 
 type Sub44 struct {
 	FriendSyncMsg *Sub44FriendSyncMsg `protobuf:"bytes,1,opt"`
 	GroupSyncMsg  *Sub44GroupSyncMsg  `protobuf:"bytes,2,opt"`
+	_             [0]func()
 }
 
 type Sub44FriendSyncMsg struct {
@@ -177,6 +204,7 @@ type GroupMemberReqBody struct {
 	NewClient       bool  `protobuf:"varint,3,opt"`
 	ClientType      int32 `protobuf:"varint,4,opt"`
 	RichCardNameVer int32 `protobuf:"varint,5,opt"`
+	_               [0]func()
 }
 
 type GroupMemberRspBody struct {
@@ -185,6 +213,7 @@ type GroupMemberRspBody struct {
 	MemInfo                *GroupMemberInfo `protobuf:"bytes,3,opt"`
 	BoolSelfLocationShared bool             `protobuf:"varint,4,opt"`
 	GroupType              int32            `protobuf:"varint,5,opt"`
+	_                      [0]func()
 }
 
 type GroupMemberInfo struct {
@@ -203,8 +232,8 @@ type GroupMemberInfo struct {
 	Lev         []byte `protobuf:"bytes,13,opt"`
 	Join        int64  `protobuf:"varint,14,opt"`
 	LastSpeak   int64  `protobuf:"varint,15,opt"`
-	//repeated CustomEntry customEnties = 16;
-	//repeated GBarInfo gbarConcerned = 17;
+	// repeated CustomEntry customEnties = 16;
+	// repeated GBarInfo gbarConcerned = 17;
 	GbarTitle              []byte `protobuf:"bytes,18,opt"`
 	GbarUrl                []byte `protobuf:"bytes,19,opt"`
 	GbarCnt                int32  `protobuf:"varint,20,opt"`
@@ -220,8 +249,8 @@ type GroupMemberInfo struct {
 	ConcernType            int32  `protobuf:"varint,30,opt"`
 	SpecialTitle           []byte `protobuf:"bytes,31,opt"`
 	SpecialTitleExpireTime int32  `protobuf:"varint,32,opt"`
-	//FlowersEntry flowerEntry = 33;
-	//TeamEntry teamEntry = 34;
+	// FlowersEntry flowerEntry = 33;
+	// TeamEntry teamEntry = 34;
 	PhoneNum []byte `protobuf:"bytes,35,opt"`
 	Job      []byte `protobuf:"bytes,36,opt"`
 	MedalId  int32  `protobuf:"varint,37,opt"`
